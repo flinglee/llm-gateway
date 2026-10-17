@@ -91,10 +91,12 @@ def record(upstream: str, model: str, key_idx: int | None, req_hash: str, pt: in
                    cost, 1 if cached else 0, 1 if ok else 0, latency_ms, task, err,
                    1 if free else 0, price_in, price_out, category or "", app or ""))
         if ok and not cached and key_idx is not None:
+            # 预算只统计真实花费：免费额度内的调用(即使有标价)不计入日预算
+            spend_cost = 0.0 if free else cost
             c.execute("INSERT INTO keystate (upstream,key_idx,day,spend,calls,fails,cooldown_until) "
                       "VALUES (?,?,?,?,1,0,0) ON CONFLICT(upstream,key_idx,day) DO UPDATE SET "
                       "spend=spend+excluded.spend, calls=calls+1",
-                      (upstream, key_idx, today(), cost))
+                      (upstream, key_idx, today(), spend_cost))
         c.commit()
 
 
@@ -157,13 +159,18 @@ def key_spend(upstream: str, key_idx: int) -> float:
     return float(r["spend"] if r else 0.0)
 
 
-def mark_fail(upstream: str, key_idx: int, cooldown_seconds: int):
+def mark_fail(upstream: str, key_idx: int, cooldown_seconds: int, cool: bool = False):
+    """记录失败次数。默认只计数不冷却——单 Key 上游冷 Key 等于冷全部模型；
+    模型级失败用 mark_model_fail 单独冷那个模型。cool=True 仅用于整 Key 级故障（预留）。"""
     c = db()
     with _LOCK:
         c.execute("INSERT INTO keystate (upstream,key_idx,day,spend,calls,fails,cooldown_until) "
-                  "VALUES (?,?,?,0,0,1,?) ON CONFLICT(upstream,key_idx,day) DO UPDATE SET "
-                  "fails=fails+1, cooldown_until=excluded.cooldown_until",
-                  (upstream, key_idx, today(), time.time() + max(0, cooldown_seconds)))
+                  "VALUES (?,?,?,0,0,1,0) ON CONFLICT(upstream,key_idx,day) DO UPDATE SET "
+                  "fails=fails+1",
+                  (upstream, key_idx, today()))
+        if cool:
+            c.execute("UPDATE keystate SET cooldown_until=? WHERE upstream=? AND key_idx=? AND day=?",
+                      (time.time() + max(0, cooldown_seconds), upstream, key_idx, today()))
         c.commit()
 
 
@@ -171,6 +178,19 @@ def in_cooldown(upstream: str, key_idx: int) -> bool:
     r = db().execute("SELECT cooldown_until FROM keystate WHERE upstream=? AND key_idx=? AND day=?",
                      (upstream, key_idx, today())).fetchone()
     return bool(r and r["cooldown_until"] and r["cooldown_until"] > time.time())
+
+
+# 模型级冷却（内存态）：单个模型失败只冷它自己，不再连坐整把 Key 的所有模型
+_MODEL_COOL: dict[tuple, float] = {}
+
+
+def mark_model_fail(upstream: str, model: str, cooldown_seconds: int):
+    _MODEL_COOL[(upstream, model)] = time.time() + max(0, cooldown_seconds)
+
+
+def model_in_cooldown(upstream: str, model: str) -> bool:
+    t = _MODEL_COOL.get((upstream, model))
+    return bool(t and t > time.time())
 
 
 # ---------- 缓存 ----------

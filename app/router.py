@@ -57,16 +57,19 @@ def _over_budget(cfg: dict, category: str | None = None, app: str | None = None,
 
 
 def _build_routes(model_list: list[dict], cfg: dict, reason: str) -> list[dict]:
-    routes = []
+    """构建路由；模型级冷却的排到后面——只有全部在冷却时才保留（重试好过 503）。"""
+    routes, cooling = [], []
     for m in model_list:
         u = _upstream_by_name(cfg, m["upstream"])
         if not u or not _active(u):
             continue
+        is_cooling = store.model_in_cooldown(u["name"], m["id"])
         for idx, key in _usable_keys(u):
-            routes.append({"upstream": u, "upstream_name": u["name"], "model": m,
-                           "model_id": m["id"], "key": key, "key_idx": idx,
-                           "free_left": m["free"]["left"], "reason": reason})
-    return routes
+            r = {"upstream": u, "upstream_name": u["name"], "model": m,
+                 "model_id": m["id"], "key": key, "key_idx": idx,
+                 "free_left": m["free"]["left"], "reason": reason}
+            (cooling if is_cooling else routes).append(r)
+    return routes + cooling
 
 
 def _reason_for(m: dict, budget_downgrade: bool = False) -> str:
@@ -115,7 +118,7 @@ def choose(task: str = "balanced", model: str | None = None,
                 pool = pricing.pool_for_category(categories.get(cat_name, ccfg) or
                                                  {"task": "cheap", "caps": cap or ""}, cfg)
             else:
-                pool = pricing.candidates(1, cap, cfg, include_free=prefer_free)
+                pool = pricing.candidates(1, cap, cfg)
             reason = _reason_for(pool[0], True) if pool else ""
         else:
             if cat_name:

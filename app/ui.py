@@ -107,6 +107,7 @@ async def api_chat(req: dict):
                 store.mark_free_exhausted(route["upstream_name"], mid,
                                           route["model"]["free"]["period"])
             store.mark_fail(u["name"], kidx, int(pol.get("cooldown_seconds") or 0))
+            store.mark_model_fail(u["name"], mid, int(pol.get("cooldown_seconds") or 0))
             continue
         latency = int((time.time() - t0) * 1000)
         choice = (data.get("choices") or [{}])[0].get("message") or {}

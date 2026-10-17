@@ -175,6 +175,7 @@ async def v1_chat(request: Request, x_task: str | None = Header(default=None),
                 # 百炼确认该模型免费额度耗尽 → 当期永久剔除免费组（reactive 对齐，避免反复重试失败）
                 store.mark_free_exhausted(route["upstream_name"], mid, route["model"]["free"]["period"])
             store.mark_fail(u["name"], kidx, int(pol.get("cooldown_seconds") or 0))
+            store.mark_model_fail(u["name"], mid, int(pol.get("cooldown_seconds") or 0))
             continue
         latency = int((time.time() - t0) * 1000)
         usage = data.get("usage") or {}
@@ -225,6 +226,8 @@ def _stream(u: dict, model_id: str, key: str | None, payload: dict, route: dict,
                                               route["model"]["free"]["period"])
                 store.mark_fail(route["upstream_name"], route["key_idx"],
                                 int((cfg.get("policy") or {}).get("cooldown_seconds") or 0))
+                store.mark_model_fail(route["upstream_name"], model_id,
+                                      int((cfg.get("policy") or {}).get("cooldown_seconds") or 0))
 
     return StreamingResponse(body_iter(), media_type="text/event-stream")
 
