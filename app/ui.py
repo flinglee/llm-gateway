@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse
 
 from . import config, store, upstream, pricing
 from . import router as _routing
+from . import memory as _memory
 
 router = APIRouter()
 
@@ -75,7 +76,12 @@ async def api_chat(req: dict):
         raise HTTPException(400, "message 为空")
 
     cfg = config.load()
+    # 长期记忆检索注入（top-k 相关记忆作为 system prompt）
+    mems = _memory.recall(msg)
     messages = _window(sid, cfg) + [{"role": "user", "content": msg}]
+    if mems:
+        sysprompt = "[长期记忆]\n" + "\n".join("- " + m["content"] for m in mems)
+        messages = [{"role": "system", "content": sysprompt}] + messages
     payload = {"messages": messages, "temperature": 0.2}
     if req.get("max_tokens"):
         payload["max_tokens"] = int(req["max_tokens"])
@@ -122,6 +128,8 @@ async def api_chat(req: dict):
 
         add(sid, "user", msg)
         add(sid, "assistant", content, model=mid, tokens=pt + ct)
+        # 后台抽取长期记忆（不阻塞回复）
+        _memory.extract_async(sid, messages[-6:] + [{"role": "assistant", "content": content}])
         return {"sid": sid, "content": content, "model": mid, "upstream": u["name"],
                 "free": is_free, "reason": route.get("reason", ""),
                 "tokens": {"prompt": pt, "completion": ct}, "cost_cny": round(cost, 6),
@@ -155,13 +163,25 @@ button,select{background:#22325c;color:#dfe6f3;border:1px solid #31456f;border-r
 button:disabled{opacity:.5}
 </style></head><body>
 <h1>llm-gateway 免费聊天 <span id="qbar" class="bar"></span></h1>
-<div class="bar">服务端会话记忆（自动截断上下文）· 每条回复显示实际模型与 token 消耗</div>
+<button onclick="show('chat')">聊天</button> <button onclick="show('mem')">记忆</button>
+<div class="bar">服务端会话记忆（自动截断上下文）· 长期记忆自动抽取/检索注入 · 每条回复显示实际模型与 token 消耗</div>
+<div id="view-chat">
 <div id="log"></div>
 <div id="row">
   <select id="task"><option value="">默认(balanced)</option><option value="cheap">cheap(小模型)</option>
   <option value="balanced">balanced</option><option value="quality">quality(旗舰免费)</option></select>
   <textarea id="txt" placeholder="输入消息，Ctrl+Enter 发送"></textarea>
   <button onclick="send()">发送</button><button onclick="cls()">清空</button>
+</div>
+</div>
+<div id="view-mem" style="display:none">
+  <div class="bar">长期记忆（自动从对话抽取 + 手动维护），跨会话生效。<span id="memcount"></span></div>
+  <div id="memlog" style="height:52vh;overflow-y:auto;border:1px solid #26314a;border-radius:8px;padding:10px;background:#131a2b"></div>
+  <div style="display:flex;gap:8px;margin-top:10px">
+    <input id="memtxt" style="flex:1;background:#131a2b;color:#dfe6f3;border:1px solid #26314a;border-radius:8px;padding:8px" placeholder="手动添加一条记忆">
+    <select id="memkind"><option value="fact">fact</option><option value="preference">preference</option></select>
+    <button onclick="addMem()">添加</button><button onclick="loadMem()">刷新</button>
+  </div>
 </div>
 <script>
 const sid = localStorage.sid || (localStorage.sid = 's' + Date.now().toString(36));
@@ -205,6 +225,32 @@ async function send(){
 async function cls(){ await fetch('/api/chat/clear',{method:'POST',headers:{'Content-Type':'application/json'},
   body:JSON.stringify({sid})}); log.innerHTML=''; }
 txt.addEventListener('keydown', e=>{ if(e.key==='Enter' && (e.ctrlKey||e.metaKey)) send(); });
+function show(t){
+  document.getElementById('view-chat').style.display = t==='chat'?'block':'none';
+  document.getElementById('view-mem').style.display = t==='mem'?'block':'none';
+  if(t==='mem') loadMem();
+}
+async function loadMem(){
+  try{ const d = await (await fetch('/api/memory')).json();
+    const box = document.getElementById('memlog'); box.innerHTML='';
+    document.getElementById('memcount').textContent = '共 ' + d.memories.length + ' 条';
+    if(!d.memories.length) box.innerHTML = '<div class="msg bot">还没有记忆。聊几句（说出你的偏好/背景），会自动抽取。</div>';
+    for(const m of d.memories){
+      const row = document.createElement('div'); row.className = 'msg bot';
+      row.innerHTML = '<span class="free">[' + esc(m.kind) + ']</span> ' + esc(m.content) +
+        '<div class="meta">命中 ' + m.hits + ' 次 · <a href="#" onclick="delMem(' + m.id + ');return false" style="color:#e8756d">删除</a></div>';
+      box.appendChild(row);
+    }
+  }catch(e){}
+}
+async function addMem(){
+  const v = document.getElementById('memtxt').value.trim(); if(!v) return;
+  await fetch('/api/memory', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({content: v, kind: document.getElementById('memkind').value})});
+  document.getElementById('memtxt').value=''; loadMem();
+}
+async function delMem(id){ await fetch('/api/memory/delete', {method:'POST',
+  headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}); loadMem(); }
 quota(); restore();
 </script></body></html>"""
 

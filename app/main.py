@@ -26,12 +26,15 @@ ALIAS_TASK = {
 }
 AUTO_PREFIX = ("auto", "auto-cheap", "auto-balanced", "auto-quality")
 
-app = FastAPI(title="llm-gateway", version="0.3.0",
+app = FastAPI(title="llm-gateway", version="0.4.0",
               description="省钱版 OpenAI 兼容网关：按性价比选模型 / 缓存去重 / 多 Key 轮换 / 额度预算")
 app.include_router(config_admin.router)
 
 from . import ui as _ui  # noqa: E402  内置聊天页 + 会话记忆
 app.include_router(_ui.router)
+
+from . import memory as _memory  # noqa: E402  长期记忆层
+app.include_router(_memory.router)
 
 
 # ---------------- 后台定时任务：每日刷新百炼控制台免费额度 ----------------

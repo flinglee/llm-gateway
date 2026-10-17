@@ -122,6 +122,10 @@ def choose(task: str = "balanced", model: str | None = None,
                 cat = categories.get(cat_name, ccfg) or {"task": task, "caps": cap or ""}
                 pool = pricing.pool_for_category(cat, cfg)
                 reason = "分类「%s」：" % cat_name + (_reason_for(pool[0], budget_downgrade) if pool else "")
+            elif cap:
+                # 指定能力（如 embedding）：只在该能力模型里选，免费额度跨档位优先
+                pool = pricing.candidates(pricing.min_tier(task), cap, cfg)
+                reason = _reason_for(pool[0], budget_downgrade) if pool else ""
             else:
                 # 所有档位统一：免费额度跨档位优先（先薅完同能力所有免费模型），免费用尽后按档位下限取最便宜付费
                 pool = pricing.route_pool(task, cfg)
