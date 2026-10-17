@@ -1,0 +1,78 @@
+{
+  "note": "业务场景分类：每个分类决定用哪档模型、要什么能力、日预算上限。客户端传 category（或 x-task 头，或直接把分类名当 model 传）。",
+  "default": "chat",
+  "categories": [
+    {
+      "name": "chat",
+      "label": "通用对话",
+      "task": "balanced",
+      "caps": "",
+      "daily_budget_cny": 2.0,
+      "note": "兜底分类；免费额度优先，用尽后最便宜"
+    },
+    {
+      "name": "schema_build",
+      "label": "建库（需求→表结构）",
+      "task": "cheap",
+      "caps": "json",
+      "daily_budget_cny": 1.0,
+      "note": "DCP 数据汇聚平台：需求文件→LLM 生成 CREATE TABLE。结构化输出为主，用便宜档"
+    },
+    {
+      "name": "analysis",
+      "label": "分析 / 治理归类",
+      "task": "quality",
+      "caps": "json",
+      "daily_budget_cny": 2.0,
+      "note": "DCP：爬取记录归类到目标表+字段映射，要推理能力"
+    },
+    {
+      "name": "crawl",
+      "label": "爬取数据治理",
+      "task": "cheap",
+      "caps": "json",
+      "daily_budget_cny": 1.0,
+      "note": "DCP：抽取/转换/去重/校验的高频调用，量大，便宜档"
+    },
+    {
+      "name": "vision",
+      "label": "视觉理解（图文）",
+      "task": "balanced",
+      "caps": "vision",
+      "daily_budget_cny": 1.0,
+      "note": "图片/截图/文档理解；只用带 vision 能力的模型"
+    },
+    {
+      "name": "asr",
+      "label": "语音识别",
+      "task": "cheap",
+      "caps": "audio",
+      "daily_budget_cny": 1.0,
+      "note": "音频转写；只用带 audio 能力的模型"
+    },
+    {
+      "name": "embedding",
+      "label": "向量化",
+      "task": "cheap",
+      "caps": "embedding",
+      "daily_budget_cny": 0.5,
+      "note": "入库检索用的向量"
+    }
+  ],
+  "apps": [
+    {
+      "key": "gw-dcp",
+      "name": "data-convergence",
+      "label": "数据汇聚平台(DCP)",
+      "daily_budget_cny": 2.0,
+      "note": "本机 DCP 调网关用的应用身份；其它应用照此格式加一行即可"
+    }
+  ],
+  "gateway_keys": [
+    {
+      "key": "gw-dcp",
+      "app": "data-convergence",
+      "note": "外部应用持此 Key 调 /v1/*（Authorization: Bearer gw-dcp）；网关替它转调上游，外部不接触上游 Key。改这里即可换 Key，也可写 ${ENV_VAR} 占位"
+    }
+  ]
+}

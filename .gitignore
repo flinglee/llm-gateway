@@ -1,0 +1,15 @@
+# 密钥与隐私，绝不提交/分发
+.env
+.pw-profile/
+.pw-profile-signup/
+.pw-cookies.json
+.freetier_cache.json
+
+# 运行产物
+data/
+*.log
+*.err
+gateway.log
+gateway.err
+__pycache__/
+*.pyc

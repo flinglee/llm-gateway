@@ -1,0 +1,637 @@
+{
+  "policy": {
+    "default_task": "balanced",
+    "daily_budget_cny": 5.0,
+    "budget_action": "downgrade",
+    "prefer_free": true,
+    "free_first_then_cheapest": true,
+    "free_low_watermark": 2000,
+    "cache_enabled": true,
+    "cache_ttl_seconds": 172800,
+    "cache_max_entries": 20000,
+    "cooldown_seconds": 180,
+    "max_retries": 2,
+    "note": "default_task=cheap|balanced|quality|free；budget_action=downgrade|reject；prefer_free=true 时优先用掉还有免费额度的模型；free_first_then_cheapest=true 时免费用尽后取全局最便宜（quality 档仍保质量下限）；free_low_watermark=免费额度低水位阈值(tokens)，剩余<=该值即视为快耗尽、自动切付费包（39元），默认2000，设0表示用尽最后一token才切"
+  },
+  "upstreams": [
+    {
+      "name": "bailian",
+      "label": "阿里云百炼",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_keys": [
+        "${BAILIAN_API_KEY}"
+             ],
+      "daily_quota_cny": 3.0,
+      "timeout": 120,
+      "enabled": true,
+      "live_quota": {
+        "type": "aliyun-bss",
+        "note": "用阿里云 AccessKey 签名调计费 OpenAPI（action=QueryAvailableInstances，端点是 business.aliyuncs.com），拉百炼免费额度/资源包的真实剩余量（覆盖本地估算）。access_key_id/secret 直接写在这里（已填），需 AK 有 BSS 只读权限(如 AliyunBSSReadOnlyAccess，或细到 bss:QueryAvailableInstances)。返回结构兼容多种 action，按模型 id 匹配实例文本再取剩余量字段；匹配不到/调用失败则回落本地估算。extra_params 可加 {\"ProductCode\":\"bailian\"} 等过滤；想用自建代理则把 type 改回 url。",
+        "access_key_id": "${ALIYUN_AK_ID}",
+        "access_key_secret": "${ALIYUN_AK_SECRET}",
+        "endpoint": "https://business.aliyuncs.com",
+        "action": "QueryAvailableInstances",
+        "version": "2017-12-14",
+        "region_id": "cn-hangzhou",
+        "extra_params": {},
+        "name_field": "Name",
+        "remaining_field": "Remaining",
+        "ttl_seconds": 300,
+        "timeout": 15
+      },
+      "note": "单 Key 也能薅：每个模型有各自的免费/限免额度，同一把 Key 换着模型调即可逐个用完。",
+      "models": [
+        {
+          "id": "qwen-turbo",
+          "label": "通义千问-Turbo",
+          "tier": 1,
+          "price_in": 0.3,
+          "price_out": 0.6,
+          "caps": "json,zh",
+          "free_quota_tokens": 1000000,
+          "free_period": "forever"
+        },
+        {
+          "id": "qwen-plus",
+          "label": "通义千问-Plus",
+          "tier": 2,
+          "price_in": 0.8,
+          "price_out": 2.0,
+          "caps": "json,zh",
+          "free_quota_tokens": 1000000,
+          "free_period": "forever"
+        },
+        {
+          "id": "qwen-max",
+          "label": "通义千问-Max",
+          "tier": 3,
+          "price_in": 2.4,
+          "price_out": 9.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen-vl-plus",
+          "label": "通义千问-VL-Plus(视觉)",
+          "tier": 2,
+          "price_in": 1.5,
+          "price_out": 4.5,
+          "caps": "json,zh,vision",
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "note": "价格为示例，以百炼当日价目为准"
+        },
+        {
+          "id": "qwen-vl-max",
+          "label": "通义千问-VL-Max(视觉·高质)",
+          "tier": 3,
+          "price_in": 3.0,
+          "price_out": 9.0,
+          "caps": "json,zh,vision,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "note": "价格为示例，以百炼当日价目为准"
+        },
+        {
+          "id": "sensevoice-v1",
+          "label": "SenseVoice 语音识别",
+          "tier": 1,
+          "price_in": 0.008,
+          "price_out": 0.0,
+          "caps": "audio,asr",
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "note": "语音按秒计费，此处单价仅作成本估算占位，请按平台实际折算"
+        },
+        {
+          "id": "text-embedding-v3",
+          "label": "百炼向量-v3",
+          "tier": 1,
+          "price_in": 0.07,
+          "price_out": 0.0,
+          "caps": "embedding",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen-long",
+          "label": "通义千问-Long(长上下文)",
+          "tier": 2,
+          "price_in": 0.8,
+          "price_out": 2.0,
+          "caps": "json,zh,long",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen-flash",
+          "label": "通义千问-Flash(极速免费)",
+          "tier": 1,
+          "price_in": 0.0,
+          "price_out": 0.0,
+          "caps": "json,zh",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen-flash-character",
+          "label": "通义千问-Flash角色版",
+          "tier": 1,
+          "price_in": 0.0,
+          "price_out": 0.0,
+          "caps": "json,zh",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen-plus-latest",
+          "label": "通义千问-Plus-Latest",
+          "tier": 2,
+          "price_in": 0.8,
+          "price_out": 2.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen-max-latest",
+          "label": "通义千问-Max-Latest",
+          "tier": 3,
+          "price_in": 2.4,
+          "price_out": 9.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.8-flash",
+          "label": "Qwen3.8-Flash",
+          "tier": 1,
+          "price_in": 0.3,
+          "price_out": 0.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "free_expire": "2026-11-25"
+        },
+        {
+          "id": "qwen3.8-max",
+          "label": "Qwen3.8-Max",
+          "tier": 3,
+          "price_in": 2.4,
+          "price_out": 9.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.8-27b",
+          "label": "Qwen3.8-27B",
+          "tier": 2,
+          "price_in": 1.0,
+          "price_out": 2.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "free_expire": "2026-11-18"
+        },
+        {
+          "id": "qwen3.7-flash",
+          "label": "Qwen3.7-Flash",
+          "tier": 1,
+          "price_in": 0.3,
+          "price_out": 0.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.7-plus",
+          "label": "Qwen3.7-Plus",
+          "tier": 2,
+          "price_in": 0.8,
+          "price_out": 2.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.7-max",
+          "label": "Qwen3.7-Max",
+          "tier": 3,
+          "price_in": 2.4,
+          "price_out": 9.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.6-flash",
+          "label": "Qwen3.6-Flash",
+          "tier": 1,
+          "price_in": 0.3,
+          "price_out": 0.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.6-plus",
+          "label": "Qwen3.6-Plus",
+          "tier": 2,
+          "price_in": 0.8,
+          "price_out": 2.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.6-35b-a3b",
+          "label": "Qwen3.6-35B-A3B",
+          "tier": 2,
+          "price_in": 1.0,
+          "price_out": 2.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.5-flash",
+          "label": "Qwen3.5-Flash",
+          "tier": 1,
+          "price_in": 0.3,
+          "price_out": 0.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.5-plus",
+          "label": "Qwen3.5-Plus",
+          "tier": 2,
+          "price_in": 0.8,
+          "price_out": 2.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.5-max",
+          "label": "Qwen3.5-Max",
+          "tier": 3,
+          "price_in": 2.4,
+          "price_out": 9.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.5-27b",
+          "label": "Qwen3.5-27B",
+          "tier": 2,
+          "price_in": 0.5,
+          "price_out": 1.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.5-35b-a3b",
+          "label": "Qwen3.5-35B-A3B",
+          "tier": 2,
+          "price_in": 0.6,
+          "price_out": 1.2,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.5-122b-a10b",
+          "label": "Qwen3.5-122B-A10B",
+          "tier": 3,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.5-397b-a17b",
+          "label": "Qwen3.5-397B-A17B",
+          "tier": 3,
+          "price_in": 4.0,
+          "price_out": 12.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen2.5-0.5b-instruct",
+          "label": "Qwen2.5-0.5B-Instruct",
+          "tier": 1,
+          "price_in": 0.1,
+          "price_out": 0.1,
+          "caps": "json,zh",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen2.5-1.5b-instruct",
+          "label": "Qwen2.5-1.5B-Instruct",
+          "tier": 1,
+          "price_in": 0.1,
+          "price_out": 0.1,
+          "caps": "json,zh",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen2.5-7b-instruct",
+          "label": "Qwen2.5-7B-Instruct",
+          "tier": 1,
+          "price_in": 0.2,
+          "price_out": 0.4,
+          "caps": "json,zh",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen2.5-14b-instruct",
+          "label": "Qwen2.5-14B-Instruct",
+          "tier": 2,
+          "price_in": 0.4,
+          "price_out": 0.8,
+          "caps": "json,zh",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen2.5-32b-instruct",
+          "label": "Qwen2.5-32B-Instruct",
+          "tier": 2,
+          "price_in": 0.8,
+          "price_out": 1.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen2.5-72b-instruct",
+          "label": "Qwen2.5-72B-Instruct",
+          "tier": 3,
+          "price_in": 1.6,
+          "price_out": 3.2,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen2-7b-instruct",
+          "label": "Qwen2-7B-Instruct",
+          "tier": 1,
+          "price_in": 0.2,
+          "price_out": 0.4,
+          "caps": "json,zh",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3-coder-flash",
+          "label": "Qwen3-Coder-Flash",
+          "tier": 1,
+          "price_in": 0.3,
+          "price_out": 0.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3-vl-plus",
+          "label": "通义千问3-VL-Plus(视觉)",
+          "tier": 2,
+          "price_in": 1.5,
+          "price_out": 4.5,
+          "caps": "json,zh,vision",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3-omni-flash",
+          "label": "Qwen3-Omni-Flash(全模态)",
+          "tier": 2,
+          "price_in": 0.5,
+          "price_out": 0.5,
+          "caps": "json,zh,vision",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen-mt-lite",
+          "label": "通义翻译-Lite",
+          "tier": 1,
+          "price_in": 0.1,
+          "price_out": 0.1,
+          "caps": "json,zh",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen-mt-plus",
+          "label": "通义翻译-Plus",
+          "tier": 2,
+          "price_in": 0.2,
+          "price_out": 0.2,
+          "caps": "json,zh",
+          "free_quota_tokens": 1000000,
+          "free_period": "month"
+        },
+        {
+          "id": "qwen3.7-flash-2026-07-15",
+          "label": "Qwen3.7-Flash(快照)",
+          "tier": 1,
+          "price_in": 0.3,
+          "price_out": 0.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "free_expire": "2026-10-23",
+          "note": "免费到期 2026-10-23（剩 6 天），到期自动切走"
+        },
+        {
+          "id": "qwen3.8-max-0902",
+          "label": "Qwen3.8-Max(快照 0902)",
+          "tier": 3,
+          "price_in": 2.4,
+          "price_out": 9.6,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "free_expire": "2026-12-01"
+        },
+        {
+          "id": "kimi-k3",
+          "label": "Kimi-K3(百炼托管)",
+          "tier": 3,
+          "price_in": 4.0,
+          "price_out": 16.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "free_expire": "2026-11-18",
+          "note": "非 qwen 系，无 BSS 计划映射，按本地记账 + reactive 403 兜底"
+        },
+        {
+          "id": "deepseek-v4-flash-0731",
+          "label": "DeepSeek-V4-Flash(快照 0731)",
+          "tier": 2,
+          "price_in": 1.0,
+          "price_out": 4.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "free_expire": "2026-10-31",
+          "note": "非 qwen 系，免费到期 2026-10-31"
+        },
+        {
+          "id": "deepseek-v4-pro-0813",
+          "label": "DeepSeek-V4-Pro(快照 0813)",
+          "tier": 3,
+          "price_in": 1.0,
+          "price_out": 4.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "free_expire": "2026-11-13",
+          "note": "Pro 级推理模型，免费档中的高质量选项；价格估算"
+        }
+      ]
+    },
+    {
+      "name": "zhipu",
+      "label": "智谱 GLM",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "api_keys": [
+        "${ZHIPU_API_KEY}"
+      ],
+      "daily_quota_cny": 1.0,
+      "timeout": 60,
+      "enabled": true,
+      "note": "glm-5.3-flash 为智谱免费档(0元)；flashx 为廉价付费；价格除免费档外为估算，以官网为准",
+      "models": [
+        {
+          "id": "glm-5.3-flash",
+          "label": "GLM-5.3-Flash(免费)",
+          "tier": 1,
+          "price_in": 0.0,
+          "price_out": 0.0,
+          "caps": "json,zh",
+          "free_quota_tokens": 0
+        },
+        {
+          "id": "glm-5.3-flashx",
+          "label": "GLM-5.3-FlashX(廉价)",
+          "tier": 1,
+          "price_in": 1.0,
+          "price_out": 4.0,
+          "caps": "json,zh",
+          "free_quota_tokens": 0
+        },
+        {
+          "id": "glm-5.3",
+          "label": "GLM-5.3(高质)",
+          "tier": 3,
+          "price_in": 4.0,
+          "price_out": 16.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 0
+        }
+      ]
+    },
+    {
+      "name": "deepseek",
+      "label": "DeepSeek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_keys": [
+        "${DEEPSEEK_API_KEY}"
+      ],
+      "daily_quota_cny": 2.0,
+      "timeout": 60,
+      "enabled": false,
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "label": "DeepSeek-V3",
+          "tier": 2,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "caps": "json,zh,reason",
+          "free_quota_tokens": 0
+        }
+      ]
+    },
+    {
+      "name": "siliconflow",
+      "label": "硅基流动",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_keys": [
+        "${SILICONFLOW_API_KEY}"
+      ],
+      "daily_quota_cny": 1.0,
+      "timeout": 60,
+      "enabled": true,
+      "note": "0 价模型为硅基流动永久免费档（免费小模型/向量）；百炼免费耗尽后自动落到这里，再往后才花钱",
+      "models": [
+        {
+          "id": "Qwen/Qwen2.5-7B-Instruct",
+          "label": "Qwen2.5-7B(免费)",
+          "tier": 1,
+          "price_in": 0.0,
+          "price_out": 0.0,
+          "caps": "json,zh",
+          "free_quota_tokens": 0
+        },
+        {
+          "id": "THUDM/GLM-4-9B-0414",
+          "label": "GLM-4-9B(免费)",
+          "tier": 1,
+          "price_in": 0.0,
+          "price_out": 0.0,
+          "caps": "json,zh",
+          "free_quota_tokens": 0
+        },
+        {
+          "id": "BAAI/bge-m3",
+          "label": "bge-m3 向量(免费)",
+          "tier": 1,
+          "price_in": 0.0,
+          "price_out": 0.0,
+          "caps": "embedding",
+          "free_quota_tokens": 0
+        }
+      ]
+    },
+    {
+      "name": "local",
+      "label": "本地 vLLM / Ollama",
+      "base_url": "http://192.168.0.34:11434/v1",
+      "api_keys": [],
+      "daily_quota_cny": 0.0,
+      "timeout": 120,
+      "enabled": false,
+      "no_auth": true,
+      "note": "内网推理，零成本，延迟取决于负载",
+      "models": [
+        {
+          "id": "qwen2.5-vl",
+          "label": "本地 Qwen2.5-VL",
+          "tier": 2,
+          "price_in": 0.0,
+          "price_out": 0.0,
+          "caps": "json,zh",
+          "free_quota_tokens": 0
+        }
+      ]
+    }
+  ]
+}

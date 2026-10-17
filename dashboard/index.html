@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LLM 省钱网关 · 控制台</title>
+<style>
+  :root { --bg:#0b1220; --card:#0f172a; --bd:#1e293b; --fg:#e2e8f0; --mut:#7d8896; --acc:#93c5fd; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.6 "Microsoft YaHei",system-ui,sans-serif; }
+  header { padding:18px 24px; border-bottom:1px solid var(--bd); display:flex; align-items:center; gap:16px; }
+  header h1 { margin:0; font-size:18px; }
+  main { padding:20px 24px 60px; max-width:1180px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--bd); border-radius:10px; padding:16px 18px; margin-bottom:16px; }
+  .card h3 { margin:0 0 12px; font-size:15px; color:var(--acc); }
+  .stats { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+  .stat { flex:1; min-width:150px; background:var(--card); border:1px solid var(--bd); border-radius:10px; padding:14px 16px; }
+  .stat b { display:block; font-size:22px; color:#fff; }
+  .stat span { color:var(--mut); font-size:12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--bd); }
+  th { color:var(--mut); font-weight:600; }
+  .muted { color:var(--mut); font-size:12px; }
+  .pill { display:inline-block; padding:1px 9px; border-radius:20px; font-size:12px; border:1px solid var(--bd); }
+  .ok { color:#86efac; } .bad { color:#fca5a5; } .warn { color:#fde68a; }
+  button, select, input, textarea { background:#111c31; color:var(--fg); border:1px solid var(--bd);
+    border-radius:8px; padding:7px 12px; font:inherit; }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  textarea { width:100%; min-height:70px; }
+  pre { background:#0a1122; border:1px solid var(--bd); border-radius:8px; padding:12px; overflow:auto;
+    font-size:12px; white-space:pre-wrap; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LLM 省钱网关</h1>
+  <span class="muted">OpenAI 兼容 · 按性价比路由 · 缓存去重 · 多 Key 轮换 · 额度/预算</span>
+</header>
+
+<main>
+  <div class="stats" id="stats"></div>
+
+  <div class="card">
+    <h3>每档推荐（最省钱的模型）</h3>
+    <div id="recommend" class="muted">加载中…</div>
+  </div>
+
+  <div class="card">
+  <h3>模型价目表（¥ / 1M tokens）——路由顺序：免费额度优先，其次单价最低</h3>
+  <table><thead><tr><th>上游</th><th>模型</th><th>档位</th><th>输入</th><th>输出</th><th>免费额度(周期)</th><th>已用</th><th>剩余</th><th>可用</th></tr></thead>
+    <tbody id="models"></tbody></table>
+  <p class="muted">价格与免费额度写在 config/providers.json（免费额度请按百炼「模型广场/额度管理」实际填写，改完即时生效无需重启）。</p>
+  </div>
+
+  <div class="card">
+    <h3>Key 配额 / 今日已用</h3>
+    <table><thead><tr><th>上游</th><th>Key#</th><th>已用(¥)</th><th>日额度(¥)</th><th>剩余</th><th>冷却中</th></tr></thead>
+      <tbody id="keys"></tbody></table>
+    <div class="row" style="margin-top:10px">
+      <button onclick="probe()">探测上游连通性</button>
+      <button onclick="clearCache()">清空缓存</button>
+      <span id="opMsg" class="muted"></span>
+    </div>
+    <pre id="probeOut" style="display:none"></pre>
+  </div>
+
+  <div class="card">
+    <h3>业务分类调度（建库 / 分析 / 爬取 / 视觉 / 语音 / 向量…）</h3>
+    <p class="muted">客户端把 <code>category</code>（或 <code>x-task</code> 头，或直接把分类名当 <code>model</code>）传进来，即按该场景的档位与能力要求选模型；顺序仍是「免费额度优先 → 最便宜」。</p>
+    <table><thead><tr><th>分类</th><th>场景</th><th>档位</th><th>能力要求</th><th>当前选中</th><th>今日花费/预算</th><th>候选(前5)</th></tr></thead>
+      <tbody id="cats"></tbody></table>
+    <p class="muted">分类定义在 config/categories.json，改完即时生效。</p>
+  </div>
+
+  <div class="card">
+    <h3>接入的应用（多应用共用网关）</h3>
+    <table><thead><tr><th>应用</th><th>Key 状态</th><th>今日花费/预算</th><th>近7天调用</th></tr></thead>
+      <tbody id="apps"></tbody></table>
+    <p class="muted">外部应用持 config/categories.json 里 <code>gateway_keys</code> 的 Key 调 <code>/v1/*</code>（Authorization: Bearer &lt;key&gt;），网关替它转调上游，外部不接触上游 Key。</p>
+  </div>
+
+  <div class="card">
+    <h3>用量与花费（近 7 天）</h3>
+    <table><thead><tr><th>日期</th><th>请求</th><th>缓存命中</th><th>Prompt</th><th>Completion</th><th>花费(¥)</th><th>平均延迟</th></tr></thead>
+      <tbody id="daily"></tbody></table>
+    <h3 style="margin-top:18px">按模型</h3>
+    <table><thead><tr><th>上游</th><th>模型</th><th>调用</th><th>花费(¥)</th><th>tokens</th></tr></thead>
+      <tbody id="byModel"></tbody></table>
+    <h3 style="margin-top:18px">最近错误</h3>
+    <div id="errors" class="muted">无</div>
+  </div>
+
+  <div class="card">
+    <h3>Key 与价格配置（在界面上配，保存即生效，不用改文件）</h3>
+    <div class="row" style="margin-bottom:10px">
+      <label>管理密钥</label><input id="admKey" placeholder="gw-admin" style="width:150px;border-color:#a16207">
+      <span class="muted">所有保存/读取都带它（请求头 x-admin-key）；默认 <b>gw-admin</b>，可用环境变量 GATEWAY_ADMIN_KEY 改</span>
+    </div>
+    <div id="cfgMsg" class="muted" style="margin-bottom:10px"></div>
+    <h3 style="font-size:13px">上游 Key（百炼 sk-… 等；支持多个，超额/冷却自动轮换）</h3>
+    <table><thead><tr><th>上游</th><th>启用</th><th>已配 Key（掩码）</th><th>新增 Key</th></tr></thead>
+      <tbody id="cfgKeys"></tbody></table>
+    <h3 style="font-size:13px;margin-top:16px">网关访问 Key（发给外部应用；外部不接触上游 Key）</h3>
+    <table><thead><tr><th>Key（掩码）</th><th>绑定应用</th><th>操作</th></tr></thead>
+      <tbody id="cfgGwKeys"></tbody></table>
+    <div class="row" style="margin-top:8px">
+      <input id="gwKeyInput" placeholder="新 Key，如 gw-xxx" style="width:180px">
+      <input id="gwAppInput" placeholder="应用名，如 data-convergence" style="width:200px">
+      <button onclick="addGwKey()">添加网关 Key</button>
+    </div>
+    <h3 style="font-size:13px;margin-top:16px">模型价格 / 免费额度（¥ 每 1M tokens；额度按 tokens 填）</h3>
+    <table><thead><tr><th>上游</th><th>模型</th><th>输入价</th><th>输出价</th><th>免费额度</th><th>周期</th><th></th></tr></thead>
+      <tbody id="cfgModels"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h3>试用：走网关调一次</h3>
+    <div class="row">
+      <select id="cat"><option value="">不指定分类（用右侧档位）</option></select>
+      <select id="task">
+        <option value="cheap">cheap（便宜优先）</option>
+        <option value="balanced" selected>balanced（均衡）</option>
+        <option value="quality">quality（高质）</option>
+        <option value="free">free（只挑免费额度）</option>
+      </select>
+      <label class="muted"><input type="checkbox" id="cacheable" checked /> 允许缓存(temperature=0)</label>
+    </div>
+    <div style="margin-top:8px"><textarea id="prompt">用一句话介绍你自己。</textarea></div>
+    <div class="row" style="margin-top:8px">
+      <button onclick="runChat()">发送</button>
+      <span class="muted">客户端只需把 base_url 指到 http://localhost:8021/v1，model 填 auto 或任意 OpenAI 模型名。</span>
+    </div>
+    <pre id="chatOut" style="display:none"></pre>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const get = async p => (await fetch(p)).json();
+const post = async p => (await fetch(p, {method:'POST'})).json();
+
+async function loadAll() {
+  const [health, price, keys, st] = await Promise.all([
+    get('/api/health'), get('/api/price'), get('/api/keys'), get('/api/stats?days=7')]);
+  cacheHits = st.daily.reduce((a,d)=>a+(d.hits||0),0);
+  const calls = st.daily.reduce((a,d)=>a+(d.calls||0),0);
+  const spend = Number(st.spend_today||0);
+  const budget = Number(st.budget||0);
+  rate = calls ? (cacheHits/calls*100) : 0;
+  $('stats').innerHTML = `
+    <div class="stat"><b>¥${spend.toFixed(4)}</b><span>今日花费 / 预算 ¥${budget}</span></div>
+    <div class="stat"><b>¥${Math.max(0,budget-spend).toFixed(4)}</b><span>今日剩余预算</span></div>
+    <div class="stat"><b>¥${(st.free_saving?.saved_cny||0).toFixed(4)}</b><span>薅到的免费额度（近7天 ${(st.free_saving?.tokens||0).toLocaleString()} tokens）</span></div>
+    <div class="stat"><b>${rate.toFixed(1)}%</b><span>缓存命中率（近7天 ${cacheHits}/${calls}）</span></div>
+    <div class="stat"><b>${health.active_upstreams.join(', ')||'无'}</b><span>已启用上游</span></div>
+    <div class="stat"><b>${st.cache.entries}</b><span>缓存条目</span></div>`;
+
+  const rec = price.recommend || {};
+  $('recommend').innerHTML = Object.keys(rec).length ? '<table><thead><tr><th>档位</th><th>推荐模型</th><th>上游</th><th>单价(入/出)</th><th>相对最贵模型省</th></tr></thead><tbody>' +
+    Object.entries(rec).map(([k,v]) => `<tr><td>${k}</td><td>${v.pick.label}</td><td>${v.pick.upstream_label}</td>
+      <td>${v.pick.price_in}/${v.pick.price_out}</td><td>${v.pick.free?.quota>0 ? v.pick.free.left.toLocaleString() : '-'}</td><td class="ok">${v.saving_vs_top_pct}%</td></tr>`).join('') + '</tbody></table>'
+    : '没有已启用的上游：请在 config/providers.json 填 Key 并 enabled:true。';
+
+  $('models').innerHTML = price.models.map(m => {
+    const f = m.free || {};
+    const freeCell = f.quota > 0
+      ? `<span class="pill ${f.active?'ok':'warn'}">${f.quota.toLocaleString()} (${f.period})</span>`
+      : '<span class="muted">无</span>';
+    const leftCell = f.quota > 0 ? f.left.toLocaleString() : '-';
+    const usedCell = f.quota > 0 ? f.used.toLocaleString() : '-';
+    return `<tr>
+    <td>${m.upstream_label}</td><td>${m.id}</td><td>${['','便宜','均衡','高质'][m.tier]||m.tier}</td>
+    <td>${m.price_in}</td><td>${m.price_out}</td><td>${freeCell}</td><td>${usedCell}</td><td>${leftCell}</td>
+    <td class="${m.enabled?'ok':'bad'}">${m.enabled?'可用':'未启用/无Key'}</td></tr>`;
+  }).join('');
+
+  $('keys').innerHTML = keys.keys.map(k => `<tr><td>${k.upstream}</td><td>#${k.key_idx}</td>
+    <td>${k.spend.toFixed(4)}</td><td>${k.quota||'-'}</td>
+    <td class="${k.left!==null && k.left<=0?'bad':'ok'}">${k.left===null?'不限':k.left.toFixed(4)}</td>
+    <td class="${k.cooldown?'warn':'muted'}">${k.cooldown?'冷却中':'正常'}</td></tr>`).join('') || '<tr><td colspan=6 class="muted">无</td></tr>';
+
+  const cats = await get('/api/categories');
+  $('cat').innerHTML = '<option value="">不指定分类（用右侧档位）</option>' +
+    (cats.categories||[]).map(c => `<option value="${c.name}">${c.name}（${c.label}）</option>`).join('');
+  $('cats').innerHTML = (cats.categories||[]).map(c => `<tr>
+    <td><code>${c.name}</code></td><td>${c.label}</td><td>${c.task}</td>
+    <td>${c.caps||'-'}${(c.models&&c.models.length)?'<br><span class="muted">白名单: '+c.models.join(', ')+'</span>':''}</td>
+    <td>${c.pick||'<span class="bad">无</span>'}${c.pick_free_left?`<br><span class="ok">免费剩 ${c.pick_free_left.toLocaleString()}</span>`:''}</td>
+    <td class="${c.left!==null&&c.left<=0?'bad':''}">${c.spend.toFixed(4)} / ${c.budget||'不限'}</td>
+    <td class="muted">${(c.candidates||[]).join(', ')||'-'}</td></tr>`).join('');
+
+  const apps = await get('/api/apps');
+  $('apps').innerHTML = (apps.apps||[]).map(a => `<tr><td>${a.label||a.name}</td>
+    <td>${(apps.gateway_keys||[]).filter(g=>g.app===a.name).map(g=>g.configured?'<span class="pill ok">已配置</span>':'<span class="pill bad">未配置</span>').join(' ')}</td>
+    <td class="${a.left!==null&&a.left<=0?'bad':''}">${a.spend.toFixed(4)} / ${a.budget||'不限'}</td>
+    <td>${((st.by_app||[]).find(x=>x.app===a.name)||{}).calls||0}</td></tr>`).join('')
+    || '<tr><td colspan=4 class="muted">还没有接入应用</td></tr>';
+
+  $('daily').innerHTML = st.daily.map(d => `<tr><td>${d.day}</td><td>${d.calls}</td><td>${d.hits||0}</td>
+    <td>${d.pt||0}</td><td>${d.ct||0}</td><td>${(d.cost||0).toFixed(4)}</td>
+    <td>${Math.round(d.lat||0)}ms</td></tr>`).join('') || '<tr><td colspan=7 class="muted">暂无调用</td></tr>';
+
+  $('byModel').innerHTML = st.by_model.map(m => `<tr><td>${m.upstream}</td><td>${m.model}</td>
+    <td>${m.calls}</td><td>${(m.cost||0).toFixed(4)}</td><td>${(m.pt||0)+(m.ct||0)}</td></tr>`).join('')
+    || '<tr><td colspan=5 class="muted">暂无调用</td></tr>';
+
+  $('errors').innerHTML = (st.errors||[]).length ? st.errors.map(e =>
+    `<div class="bad">${e.upstream}/${e.model} ×${e.n} — ${(e.err||'').slice(0,160)}</div>`).join('')
+    : '无';
+}
+
+// ---------- Key 与价格配置 ----------
+function adminKey() {
+  const v = $('admKey').value || localStorage.getItem('gwAdminKey') || 'gw-admin';
+  localStorage.setItem('gwAdminKey', v);
+  $('admKey').value = v;
+  return v;
+}
+async function admin(path, method = 'POST', body = null) {
+  const r = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey() },
+    body: body ? JSON.stringify(body) : null,
+  });
+  const txt = await r.text();
+  let d;
+  try { d = JSON.parse(txt); } catch (e) { d = { raw: txt.slice(0, 200) }; }
+  if (!r.ok) {
+    const msg = (d && d.detail) ? (d.detail.message || d.detail) : (d.raw || r.status);
+    $('cfgMsg').textContent = '操作失败：' + msg;
+    return null;
+  }
+  return d;
+}
+function cfgMsg(t) { $('cfgMsg').textContent = t; }
+
+async function loadConfig() {
+  adminKey();
+  const r = await fetch('/api/config', { headers: { 'x-admin-key': adminKey() } });
+  if (r.status === 403) {
+    cfgMsg('管理密钥不对（403）。默认是 gw-admin；若在服务端用环境变量 GATEWAY_ADMIN_KEY 改过，就填那个值。');
+    $('cfgKeys').innerHTML = '<tr><td colspan=4 class="muted">管理密钥不对，读不到配置。请先确认上方「管理密钥」输入框。</td></tr>';
+    $('cfgGwKeys').innerHTML = '';
+    $('cfgModels').innerHTML = '';
+    return;
+  }
+  const d = await r.json();
+  const ups = (d.providers.upstreams || []);
+  $('cfgKeys').innerHTML = ups.map(u => {
+    const keys = (u.api_keys_masked || []).map((k, i) =>
+      `<span class="pill">${k}</span> <a href="javascript:void(0)" style="color:#fca5a5" onclick="delUpstreamKey('${u.name}',${i})">删</a>`).join(' ') || '<span class="muted">未配置</span>';
+    return `<tr><td>${u.name}<div class="muted">${u.label || ''}</div></td>
+      <td><input type="checkbox" ${u.enabled ? 'checked' : ''} onchange="toggleUpstream('${u.name}', this.checked)"></td>
+      <td>${keys}</td>
+      <td class="row"><input id="k_${u.name}" placeholder="sk-..." style="width:170px">
+        <button onclick="addUpstreamKey('${u.name}')">添加</button></td></tr>`;
+  }).join('');
+
+  $('cfgGwKeys').innerHTML = (d.categories.gateway_keys || []).map((g, i) =>
+    `<tr><td><span class="pill">${g.key}</span></td><td>${g.app}</td>
+     <td><a href="javascript:void(0)" style="color:#fca5a5" onclick="delGwKey(${i})">删除</a></td></tr>`).join('')
+    || '<tr><td colspan=3 class="muted">还没有网关访问 Key</td></tr>';
+
+  const rows = [];
+  for (const u of ups) for (const m of (u.models || [])) {
+    rows.push(`<tr><td>${u.name}</td><td>${m.id}</td>
+      <td><input id="pin_${u.name}_${m.id}" value="${m.price_in ?? 0}" style="width:70px"></td>
+      <td><input id="pout_${u.name}_${m.id}" value="${m.price_out ?? 0}" style="width:70px"></td>
+      <td><input id="fq_${u.name}_${m.id}" value="${m.free_quota_tokens ?? 0}" style="width:110px"></td>
+      <td><input id="fp_${u.name}_${m.id}" value="${m.free_period || 'month'}" style="width:70px"></td>
+      <td><button onclick="saveModel('${u.name}','${m.id}')">保存</button></td></tr>`);
+  }
+  $('cfgModels').innerHTML = rows.join('');
+}
+
+async function toggleUpstream(name, on) {
+  const r = await admin('/api/config/upstreams/' + encodeURIComponent(name) + '/enabled',
+                        'POST', { enabled: on });
+  cfgMsg(r ? `已${on ? '启用' : '停用'} ${name}（即时生效）` : '');
+  if (r) loadAll();
+}
+async function addUpstreamKey(name) {
+  const v = $('k_' + name).value.trim();
+  if (!v) { cfgMsg('Key 不能为空'); return; }
+  const r = await admin('/api/config/upstreams/' + encodeURIComponent(name) + '/keys',
+                        'POST', { key: v, enabled: true });
+  cfgMsg(r ? `已给 ${name} 添加 Key（共 ${r.count} 把，即时生效）` : '');
+  if (r) { $('k_' + name).value = ''; loadConfig(); loadAll(); }
+}
+async function delUpstreamKey(name, idx) {
+  if (!confirm(`删除 ${name} 的第 ${idx + 1} 把 Key？`)) return;
+  const r = await admin(`/api/config/upstreams/${encodeURIComponent(name)}/keys/${idx}`, 'DELETE');
+  cfgMsg(r ? '已删除' : '');
+  if (r) { loadConfig(); loadAll(); }
+}
+async function saveModel(up, id) {
+  const num = v => { const n = Number(v); return isNaN(n) ? 0 : n; };
+  const body = {
+    price_in: num($('pin_' + up + '_' + id).value),
+    price_out: num($('pout_' + up + '_' + id).value),
+    free_quota_tokens: num($('fq_' + up + '_' + id).value),
+    free_period: $('fp_' + up + '_' + id).value || 'month',
+  };
+  const r = await admin('/api/config/models', 'POST', Object.assign({ upstream: up, id }, body));
+  cfgMsg(r ? `已保存 ${up}/${id}` : '');
+  if (r) loadAll();
+}
+async function addGwKey() {
+  const k = $('gwKeyInput').value.trim(), a = $('gwAppInput').value.trim();
+  if (!k || !a) { cfgMsg('Key 和应用名都要填'); return; }
+  const r = await admin('/api/config/gateway-keys', 'POST', { key: k, app: a });
+  cfgMsg(r ? `已给应用「${a}」发 Key（外部用 Authorization: Bearer ${k} 调 /v1/*）` : '');
+  if (r) { $('gwKeyInput').value = ''; loadConfig(); loadAll(); }
+}
+async function delGwKey(idx) {
+  if (!confirm('删除这把网关访问 Key？用它接入的应用会失效')) return;
+  const r = await admin('/api/config/gateway-keys/' + idx, 'DELETE');
+  cfgMsg(r ? '已删除' : '');
+  if (r) { loadConfig(); loadAll(); }
+}
+
+async function runChat() {
+  $('chatOut').style.display='block';
+  $('chatOut').textContent = '请求中…';
+  const cat = $('cat').value;
+  const body = { model: 'auto', messages: [{role:'user', content: $('prompt').value}],
+                 temperature: $('cacheable').checked ? 0 : 0.7 };
+  if (cat) body.category = cat;
+  const r = await fetch('/v1/chat/completions', {method:'POST',
+    headers: Object.assign({'Content-Type':'application/json'}, cat ? {} : {'x-task': $('task').value}),
+    body: JSON.stringify(body)});
+  const d = await r.json();
+  $('chatOut').textContent = JSON.stringify(d, null, 2);
+  loadAll();
+}
+
+async function probe() {
+  $('probeOut').style.display='block';
+  $('probeOut').textContent = '探测中…';
+  const d = await post('/api/probe');
+  $('probeOut').textContent = JSON.stringify(d, null, 2);
+}
+
+async function clearCache() {
+  const d = await post('/api/cache/clear');
+  $('opMsg').textContent = '已清空 ' + d.cleared + ' 条缓存';
+  loadAll();
+}
+
+loadAll();
+loadConfig();
+</script>
+</body>
+</html>
