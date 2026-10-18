@@ -140,6 +140,25 @@ def _spawn_refresh():
     threading.Thread(target=run, daemon=True).start()
 
 
+def has_data() -> bool:
+    """控制台免费额度清单是否已拿到过数据（含缓存文件）。
+
+    free_left 用它做"完全权威"判定的前提：一旦有清单，
+    不在清单里的模型一律视为按量付费（免费额度 0）。
+    """
+    global _api
+    with _lock:
+        if _api is None:
+            try:
+                _api = json.load(open(CACHE, encoding="utf-8"))
+            except Exception:
+                _api = None
+        if _api is None:
+            return False
+        # 有缓存文件才算"有数据"；且要求 quotas 非空（抓取失败不会写文件，双保险）
+        return bool((_api or {}).get("quotas"))
+
+
 def get_model_quota(model_id: str, upstream_type: str | None = None) -> dict | None:
     """取某模型的实时免费额度信息；缓存过期则后台刷新。
 

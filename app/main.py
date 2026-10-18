@@ -26,7 +26,7 @@ ALIAS_TASK = {
 }
 AUTO_PREFIX = ("auto", "auto-cheap", "auto-balanced", "auto-quality")
 
-app = FastAPI(title="llm-gateway", version="0.4.0",
+app = FastAPI(title="llm-gateway", version="0.4.2",
               description="省钱版 OpenAI 兼容网关：按性价比选模型 / 缓存去重 / 多 Key 轮换 / 额度预算")
 app.include_router(config_admin.router)
 

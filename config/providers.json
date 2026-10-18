@@ -4,6 +4,7 @@
     "daily_budget_cny": 5.0,
     "budget_action": "downgrade",
     "prefer_free": true,
+    "allow_paid": false,
     "free_first_then_cheapest": true,
     "free_low_watermark": 2000,
     "cache_enabled": true,
@@ -126,10 +127,10 @@
         },
         {
           "id": "qwen-flash",
-          "label": "通义千问-Flash(极速免费)",
+          "label": "通义千问-Flash",
           "tier": 1,
-          "price_in": 0.0,
-          "price_out": 0.0,
+          "price_in": 0.15,
+          "price_out": 1.5,
           "caps": "json,zh",
           "free_quota_tokens": 1000000,
           "free_period": "month"
@@ -138,8 +139,8 @@
           "id": "qwen-flash-character",
           "label": "通义千问-Flash角色版",
           "tier": 1,
-          "price_in": 0.0,
-          "price_out": 0.0,
+          "price_in": 0.15,
+          "price_out": 1.5,
           "caps": "json,zh",
           "free_quota_tokens": 1000000,
           "free_period": "month"
@@ -526,7 +527,8 @@
           "price_in": 0.0,
           "price_out": 0.0,
           "caps": "json,zh",
-          "free_quota_tokens": 0
+          "free_quota_tokens": 0,
+          "platform_free": true
         },
         {
           "id": "glm-5.3-flashx",
@@ -589,7 +591,8 @@
           "price_in": 0.0,
           "price_out": 0.0,
           "caps": "json,zh",
-          "free_quota_tokens": 0
+          "free_quota_tokens": 0,
+          "platform_free": true
         },
         {
           "id": "THUDM/GLM-4-9B-0414",
@@ -598,7 +601,8 @@
           "price_in": 0.0,
           "price_out": 0.0,
           "caps": "json,zh",
-          "free_quota_tokens": 0
+          "free_quota_tokens": 0,
+          "platform_free": true
         },
         {
           "id": "BAAI/bge-m3",
@@ -607,7 +611,8 @@
           "price_in": 0.0,
           "price_out": 0.0,
           "caps": "embedding",
-          "free_quota_tokens": 0
+          "free_quota_tokens": 0,
+          "platform_free": true
         }
       ]
     },

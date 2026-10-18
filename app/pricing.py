@@ -32,7 +32,9 @@ def free_left(m: dict, upstream: dict | None = None) -> int:
     q = int(m.get("free_quota_tokens") or 0)
     if q <= 0:
         return 0
-    # ① 控制台实时免费额度（VALID=按剩余量；明确过期/耗尽=0；UNKNOWN/无记录=回落）
+    # ① 控制台实时数据完全权威（一旦拿到过数据）：
+    #    VALID=按剩余量；其余任何状态(UNKNOWN/EXPIRED/EXHAUSTED)或不在清单里 = 按量付费(0免费)
+    #    —— qwen-max/397B 这类不在控制台免费清单的模型绝不能再被误标为免费
     ft = freetier.get_model_quota(m["id"])
     if ft is not None:
         st = str(ft.get("status") or "")
@@ -47,8 +49,10 @@ def free_left(m: dict, upstream: dict | None = None) -> int:
                 except Exception:
                     pass
             return max(0, int(ft.get("remaining") or 0))
-        if st and st != "UNKNOWN":  # EXPIRED / EXHAUSTED / INVALID 等
-            return 0
+        return 0
+    if freetier.has_data():
+        return 0  # 清单里有数据但没有这个模型 = 无免费额度
+    # ② 兜底：控制台数据从未拉到过(启动瞬间/抓取故障)才用 BSS/本地估算
     if _free_expired(m):
         return 0
     if upstream:
@@ -144,6 +148,7 @@ def all_models(cfg: dict | None = None) -> list[dict]:
                 "caps": m.get("caps", ""),
                 "free_quota_tokens": int(m.get("free_quota_tokens") or 0),
                 "free_period": m.get("free_period") or "month",
+                "platform_free": bool(m.get("platform_free")),
                 "enabled": bool(u.get("enabled")) and bool(u.get("api_keys")),
                 "unit": float(m.get("price_in", 0)) + float(m.get("price_out", 0)),
             }
@@ -155,6 +160,27 @@ def all_models(cfg: dict | None = None) -> list[dict]:
 def _sort_key(m: dict):
     """免费额度未用尽的排最前（内部按单价）；之后按总价、档位。"""
     return (0 if m["free"]["active"] else 1, m["unit"], m["tier"], m["id"])
+
+
+def _is_free(m: dict) -> bool:
+    """该模型当前是否零成本可用。
+
+    显式 platform_free=true 的模型（如硅基流动免费小模型、智谱 flash）视为平台免费，
+    与控制台免费额度无关、永不计费；不再用 unit<=0 猜测（价目表漏填价格≠免费，
+    qwen-flash 曾因价格占位 0 被误判 0 成本直连按量付费，烧光余额的根因之一）。
+    """
+    return bool(m["free"]["active"]) or bool(m.get("platform_free"))
+
+
+def _allow_paid(cfg: dict | None = None) -> bool:
+    """policy.allow_paid：是否允许路由到付费模型。false = 只用免费/0成本模型，
+    付费模型一律不进候选池（硬闸，防止任何误配置再烧真金白银）。"""
+    try:
+        cfg = cfg or load()
+        v = (cfg.get("policy") or {}).get("allow_paid")
+        return True if v is None else bool(v)
+    except Exception:
+        return True
 
 
 def candidates(min_tier_value: int = 1, cap: str | None = None, cfg: dict | None = None,
@@ -173,15 +199,14 @@ def candidates(min_tier_value: int = 1, cap: str | None = None, cfg: dict | None
         return sorted(ms, key=_sort_key)
     ms = [m for m in ms if not any(c in (m["caps"] or "") for c in NON_TEXT_CAPS)]
     floor = min_tier_value
-    # 免费(含0成本)模型同样要过任务档位下限：cheap 不限；balanced 用 tier>=2；quality 用 tier>=3。
-    # 避免推理/高质请求被最小的免费模型(qwen-flash、7B)接住。
-    free_ms = [m for m in ms if (m["free"]["active"] or m["unit"] <= 0) and m["tier"] >= floor]
-    paid_ms = [m for m in ms if not (m["free"]["active"] or m["unit"] <= 0)
-               and m["tier"] >= floor]
+    free_ms = [m for m in ms if _is_free(m) and m["tier"] >= floor]
+    paid_ms = [] if not _allow_paid(cfg) else \
+        [m for m in ms if not _is_free(m) and m["tier"] >= floor]
     if not free_ms and not paid_ms:
         # 兜底：该档位下限完全无候选(配置极端时) → 放松到全部，保证可用
-        free_ms = [m for m in ms if m["free"]["active"] or m["unit"] <= 0]
-        paid_ms = [m for m in ms if not (m["free"]["active"] or m["unit"] <= 0)]
+        free_ms = [m for m in ms if _is_free(m)]
+        if _allow_paid(cfg):
+            paid_ms = [m for m in ms if not _is_free(m)]
         floor = 1
     # 排序：cheap 档免费组按单价(最便宜优先)；balanced/quality 档免费组先比能力(tier 高者优先)，
     # 同级内再按单价降序(价高≈更强，优选最强免费，反正不花钱)
@@ -248,13 +273,14 @@ def pool_for_category(cat: dict, cfg: dict | None = None) -> list[dict]:
     else:
         pool = [m for m in all_models(cfg)
                 if m["enabled"] and not any(c in (m["caps"] or "") for c in NON_TEXT_CAPS)]
-    # 免费(含0成本)与付费都卡档位下限；免费组在 balanced/quality 档先比能力再比单价
-    free_ms = [m for m in pool if (m["free"]["active"] or m["unit"] <= 0) and m["tier"] >= floor]
-    paid_ms = [m for m in pool if not (m["free"]["active"] or m["unit"] <= 0)
-               and m["tier"] >= floor]
+    # 免费(含平台免费)与付费都卡档位下限；免费组在 balanced/quality 档先比能力再比单价
+    free_ms = [m for m in pool if _is_free(m) and m["tier"] >= floor]
+    paid_ms = [] if not _allow_paid(cfg) else \
+        [m for m in pool if not _is_free(m) and m["tier"] >= floor]
     if not free_ms and not paid_ms:
-        free_ms = [m for m in pool if m["free"]["active"] or m["unit"] <= 0]
-        paid_ms = [m for m in pool if not (m["free"]["active"] or m["unit"] <= 0)]
+        free_ms = [m for m in pool if _is_free(m)]
+        if _allow_paid(cfg):
+            paid_ms = [m for m in pool if not _is_free(m)]
         floor = 1
     fkey = _sort_key if floor <= 1 else (lambda m: (-m["tier"], -m["unit"], m["id"]))
     pool = sorted(free_ms, key=fkey) + sorted(paid_ms, key=_sort_key)
