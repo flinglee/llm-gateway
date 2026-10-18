@@ -186,3 +186,9 @@ dashboard/       index.html 控制台（单页，暗色，风格与 DCP 控制�
 - 背景：CodeBuddy 面板显示 56M tokens 输入 99.7% 缓存命中、$0——上游 prompt 前缀缓存是自动的，网关此前把缓存命中按全价记账，导致账本与阿里云账单对不平。
 - 改动：usage 表加 `cache_read_tokens` 列（_migrate 自动迁移，实测生效）；解析 `usage.prompt_tokens_details.cached_tokens`；`cost_of(m,pt,ct,cached_pt)` 缓存输入按 `policy.cache_input_ratio`（默认 0.4）折扣计价；stats daily/by_model 带 cache_read 汇总。
 - 注意：gateway.db 在 `data/` 下；验证时曾在项目根误建空 gateway.db（sqlite3.connect 会静默新建），查库务必先确认路径。
+
+## v0.4.4 kimi-k3 400 连锁故障修复（2026-10-18，「模型都不能用了」真因）
+- 真因：kimi-k3 不支持自定义 temperature（网关默认塞 0.2 → 上游 400 InvalidParameter）。balanced/quality 档 kimi-k3 排候选第一：非流式还能重试到第二条路由；**流式只打第一条路由、失败即 500**——DCP 走流式所以表现为「全挂」。
+- 修复三层：① upstream.chat/chat_stream 识别 temperature 拒绝（400+temperature+not supported/invalid）→ 自动去掉 temperature/top_p 等采样参数重试一次；② 4xx（is_client_error）不 mark_fail/mark_model_fail（确定性错误，冷却无意义），只换下一条路由；③ 流式在返回 StreamingResponse 前预取首块，首块异常可换下一条路由（_stream 支持复用 gen+first）。
+- 实测：kimi-k3 非流式/流式、auto-quality/balanced、全部头部免费模型均通过（唯一内容防响应缓存假阳性）。
+- 教训：网关加「默认参数」前先确认兼容性；流式路径必须有路由切换能力，否则头部模型一个参数不兼容就全链路瘫痪。

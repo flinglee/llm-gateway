@@ -26,6 +26,19 @@ def is_quota_exhausted_error(e: BaseException) -> bool:
     return any(h in msg for h in QUOTA_HINTS)
 
 
+def is_client_error(e: BaseException) -> bool:
+    """4xx = 请求本身的问题（参数不兼容等），重试/冷却都无意义，不该把模型拉黑。"""
+    return isinstance(e, UpstreamError) and 400 <= (e.status or 0) < 500
+
+
+def _is_temperature_reject(e: BaseException) -> bool:
+    """上游拒绝 temperature 参数（如 kimi-k3 只支持默认采样参数）。"""
+    if not isinstance(e, UpstreamError) or e.status != 400:
+        return False
+    low = (e.body or "").lower()
+    return "temperature" in low and ("not supported" in low or "invalid" in low)
+
+
 def _headers(key: str | None) -> dict:
     h = {"Content-Type": "application/json"}
     if key:
@@ -59,17 +72,36 @@ def chat(u: dict, model_id: str, key: str | None, payload: dict) -> dict:
     url = base(u) + "/chat/completions"
     body = dict(payload)
     body["model"] = model_id
-    with _request(url, body, key, u.get("timeout", 60)) as r:
-        return json.loads(r.read().decode("utf-8"))
+    try:
+        with _request(url, body, key, u.get("timeout", 60)) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except UpstreamError as e:
+        if _is_temperature_reject(e) and "temperature" in body:
+            # 个别模型（kimi-k3 等）不支持自定义 temperature → 去掉采样参数重试一次
+            body = {k: v for k, v in body.items()
+                    if k not in ("temperature", "top_p", "presence_penalty",
+                                 "frequency_penalty")}
+            with _request(url, body, key, u.get("timeout", 60)) as r:
+                return json.loads(r.read().decode("utf-8"))
+        raise
 
 
 def chat_stream(u: dict, model_id: str, key: str | None, payload: dict):
-    """SSE 流式转发生成器（逐字节产出）。"""
+    """SSE 流式转发生成器（逐字节产出）；temperature 被拒时自动去参重试。"""
     url = base(u) + "/chat/completions"
     body = dict(payload)
     body["model"] = model_id
     body["stream"] = True
-    resp = _request(url, body, key, u.get("timeout", 60), stream=True)
+    try:
+        resp = _request(url, body, key, u.get("timeout", 60), stream=True)
+    except UpstreamError as e:
+        if _is_temperature_reject(e) and "temperature" in body:
+            body = {k: v for k, v in body.items()
+                    if k not in ("temperature", "top_p", "presence_penalty",
+                                 "frequency_penalty")}
+            resp = _request(url, body, key, u.get("timeout", 60), stream=True)
+        else:
+            raise
     try:
         for chunk in resp:
             if chunk:

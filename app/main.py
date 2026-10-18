@@ -26,7 +26,7 @@ ALIAS_TASK = {
 }
 AUTO_PREFIX = ("auto", "auto-cheap", "auto-balanced", "auto-quality")
 
-app = FastAPI(title="llm-gateway", version="0.4.3",
+app = FastAPI(title="llm-gateway", version="0.4.4",
               description="省钱版 OpenAI 兼容网关：按性价比选模型 / 缓存去重 / 多 Key 轮换 / 额度预算")
 app.include_router(config_admin.router)
 
@@ -166,7 +166,23 @@ async def v1_chat(request: Request, x_task: str | None = Header(default=None),
         u, mid, key, kidx = route["upstream"], route["model_id"], route["key"], route["key_idx"]
         t0 = time.time()
         if stream:
-            return _stream(u, mid, key, payload, route, task, cfg, category=category or "", app=app)
+            gen = upstream.chat_stream(u, mid, key, payload)
+            try:
+                first = next(gen)  # 预取首块：上游 HTTP 4xx/连接错误在此抛出，可换下一条路由
+            except StopIteration:
+                first = b""
+            except Exception as e:
+                last_err = repr(e)[:300]
+                if upstream.is_quota_exhausted_error(e):
+                    store.mark_free_exhausted(route["upstream_name"], mid,
+                                              route["model"]["free"]["period"])
+                if upstream.is_client_error(e):
+                    continue  # 请求参数与该模型不兼容 → 不冷却，换下一条路由
+                store.mark_fail(u["name"], kidx, int(pol.get("cooldown_seconds") or 0))
+                store.mark_model_fail(u["name"], mid, int(pol.get("cooldown_seconds") or 0))
+                continue
+            return _stream(u, mid, key, payload, route, task, cfg,
+                           category=category or "", app=app, gen=gen, first=first)
         try:
             data = upstream.chat(u, mid, key, payload)
         except Exception as e:
@@ -174,6 +190,11 @@ async def v1_chat(request: Request, x_task: str | None = Header(default=None),
             if upstream.is_quota_exhausted_error(e):
                 # 百炼确认该模型免费额度耗尽 → 当期永久剔除免费组（reactive 对齐，避免反复重试失败）
                 store.mark_free_exhausted(route["upstream_name"], mid, route["model"]["free"]["period"])
+            if upstream.is_client_error(e):
+                # 4xx 是请求参数与该模型不兼容（如 kimi-k3 拒绝 temperature），已在 upstream 层
+                # 自动去参重试过；仍失败说明该模型确实吃不下这个请求 → 不冷却模型（确定性错误），
+                # 但要换下一条路由继续，故只记 err 不 mark_fail/mark_model_fail
+                continue
             store.mark_fail(u["name"], kidx, int(pol.get("cooldown_seconds") or 0))
             store.mark_model_fail(u["name"], mid, int(pol.get("cooldown_seconds") or 0))
             continue
@@ -191,15 +212,21 @@ async def v1_chat(request: Request, x_task: str | None = Header(default=None),
 
 
 def _stream(u: dict, model_id: str, key: str | None, payload: dict, route: dict, task: str, cfg: dict,
-            category: str = "", app: str = ""):
-    """流式转发（不缓存）；结束后用估算输入 tokens 记账。"""
+            category: str = "", app: str = "", gen=None, first: bytes = b""):
+    """流式转发（不缓存）；结束后用估算输入 tokens 记账。
+
+    gen/first：调用方已预取好首块的生成器（用于首块失败时切换路由）。
+    """
     pt, _ = pricing.estimate_tokens(payload.get("messages") or [])
     t0 = time.time()
-    gen = upstream.chat_stream(u, model_id, key, payload)
+    if gen is None:
+        gen = upstream.chat_stream(u, model_id, key, payload)
     ok = {"v": True}
 
     def body_iter():
         try:
+            if first:
+                yield first
             for chunk in gen:
                 yield chunk
         except Exception as ex:
