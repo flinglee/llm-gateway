@@ -181,3 +181,8 @@ dashboard/       index.html 控制台（单页，暗色，风格与 DCP 控制�
 - **¥39 不是 API 消费**：10-17 有一笔「Token Plan 个人版 Lite 套餐」包月**新购订单**（Item=SubscriptionOrder，原价 ¥60 折扣 ¥21 实付 ¥39 整，InstanceID=sfm_tokenplansolo_public_cn-7mx5083ie05）。余额是被这笔订阅买掉的，不是被网关烧的。
 - **网关误路由的真实损失 = ¥1.05**：10-17 ¥0.31 + 10-18 ¥0.74，主要是 qwen3.5-397b-a17b output ¥0.73 + qwen-max ¥0.29，其余 qwen-plus/flash/character/text-embedding 都是零点几分级。合计 10 月 ¥40.05 → 余额耗尽欠 ¥0.04。
 - v0.4.2 修复后的免费池与 Lite 套餐配额（sfm_tokenplansolo Normal）对上了——控制台 82 个 VALID 模型仍可用，免费薅不受影响。
+
+## v0.4.3 上游 prompt 缓存记账（2026-10-18）
+- 背景：CodeBuddy 面板显示 56M tokens 输入 99.7% 缓存命中、$0——上游 prompt 前缀缓存是自动的，网关此前把缓存命中按全价记账，导致账本与阿里云账单对不平。
+- 改动：usage 表加 `cache_read_tokens` 列（_migrate 自动迁移，实测生效）；解析 `usage.prompt_tokens_details.cached_tokens`；`cost_of(m,pt,ct,cached_pt)` 缓存输入按 `policy.cache_input_ratio`（默认 0.4）折扣计价；stats daily/by_model 带 cache_read 汇总。
+- 注意：gateway.db 在 `data/` 下；验证时曾在项目根误建空 gateway.db（sqlite3.connect 会静默新建），查库务必先确认路径。
