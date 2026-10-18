@@ -54,7 +54,8 @@ def _migrate(c: sqlite3.Connection):
                              ("usage", "price_in", "REAL DEFAULT 0"),
                              ("usage", "price_out", "REAL DEFAULT 0"),
                              ("usage", "category", "TEXT DEFAULT ''"),
-                             ("usage", "app", "TEXT DEFAULT ''")):
+                             ("usage", "app", "TEXT DEFAULT ''"),
+                             ("usage", "cache_read_tokens", "INTEGER DEFAULT 0")):
         cols = [r[1] for r in c.execute("pragma table_info(%s)" % table)]
         if col not in cols:
             c.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, col, decl))
@@ -81,15 +82,16 @@ def period_key(period: str) -> str:
 def record(upstream: str, model: str, key_idx: int | None, req_hash: str, pt: int, ct: int,
            cost: float, cached: bool, ok: bool, latency_ms: int, task: str, err: str = "",
            free: bool = False, price_in: float = 0.0, price_out: float = 0.0,
-           category: str = "", app: str = ""):
+           category: str = "", app: str = "", cache_read: int = 0):
     c = db()
     with _LOCK:
         c.execute("INSERT INTO usage (ts,day,upstream,model,key_idx,req_hash,prompt_tokens,"
                   "completion_tokens,cost,cached,ok,latency_ms,task,err,free,price_in,price_out,"
-                  "category,app) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  "category,app,cache_read_tokens) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (time.time(), today(), upstream, model, key_idx, req_hash, pt, ct,
                    cost, 1 if cached else 0, 1 if ok else 0, latency_ms, task, err,
-                   1 if free else 0, price_in, price_out, category or "", app or ""))
+                   1 if free else 0, price_in, price_out, category or "", app or "",
+                   max(0, int(cache_read or 0))))
         if ok and not cached and key_idx is not None:
             # 预算只统计真实花费：免费额度内的调用(即使有标价)不计入日预算
             spend_cost = 0.0 if free else cost
@@ -250,11 +252,13 @@ def stats(days: int = 7) -> dict:
     since = time.time() - days * 86400
     rows = [dict(r) for r in c.execute(
         "SELECT day, SUM(prompt_tokens) pt, SUM(completion_tokens) ct, SUM(cost) cost,"
-        " COUNT(*) calls, SUM(cached) hits, AVG(latency_ms) lat, SUM(free) free_calls FROM usage "
+        " COUNT(*) calls, SUM(cached) hits, AVG(latency_ms) lat, SUM(free) free_calls,"
+        " SUM(cache_read_tokens) cache_read FROM usage "
         "WHERE ts>=? GROUP BY day ORDER BY day", (since,)).fetchall()]
     by_model = [dict(r) for r in c.execute(
         "SELECT upstream, model, SUM(cost) cost, COUNT(*) calls, SUM(prompt_tokens) pt,"
-        " SUM(completion_tokens) ct, SUM(free) free_calls, AVG(latency_ms) lat FROM usage WHERE ts>=? "
+        " SUM(completion_tokens) ct, SUM(free) free_calls, AVG(latency_ms) lat,"
+        " SUM(cache_read_tokens) cache_read FROM usage WHERE ts>=? "
         "GROUP BY upstream, model ORDER BY cost DESC", (since,)).fetchall()]
     errors = [dict(r) for r in c.execute(
         "SELECT upstream, model, err, COUNT(*) n FROM usage WHERE ok=0 AND ts>=? "

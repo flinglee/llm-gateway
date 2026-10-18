@@ -115,15 +115,16 @@ async def api_chat(req: dict):
         usage = data.get("usage") or {}
         pt = usage.get("prompt_tokens") or 0
         ct = usage.get("completion_tokens") or 0
+        cached_pt = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
         if not pt:
             pt, ct = pricing.estimate_tokens(messages, content)
 
         m = route["model"]
-        is_free = bool(m["free"]["active"]) or m["unit"] <= 0
-        cost = pricing.cost_of(m, pt, ct)
+        is_free = bool(m["free"]["active"]) or bool(m.get("platform_free"))
+        cost = pricing.cost_of(m, pt, ct, cached_pt)
         store.record(route["upstream_name"], mid, kidx, "", pt, ct, cost, False, True,
                      latency, task or "", free=is_free,
-                     price_in=m["price_in"], price_out=m["price_out"])
+                     price_in=m["price_in"], price_out=m["price_out"], cache_read=cached_pt)
         if m["free"]["active"]:
             store.tick_model(route["upstream_name"], mid, m["free"]["period"], pt, cost)
 
@@ -133,7 +134,8 @@ async def api_chat(req: dict):
         _memory.extract_async(sid, messages[-6:] + [{"role": "assistant", "content": content}])
         return {"sid": sid, "content": content, "model": mid, "upstream": u["name"],
                 "free": is_free, "reason": route.get("reason", ""),
-                "tokens": {"prompt": pt, "completion": ct}, "cost_cny": round(cost, 6),
+                "tokens": {"prompt": pt, "completion": ct, "cached_prompt": cached_pt},
+                "cost_cny": round(cost, 6),
                 "latency_ms": latency}
     raise HTTPException(502, "全部上游失败：" + last_err)
 

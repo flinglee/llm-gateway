@@ -26,7 +26,7 @@ ALIAS_TASK = {
 }
 AUTO_PREFIX = ("auto", "auto-cheap", "auto-balanced", "auto-quality")
 
-app = FastAPI(title="llm-gateway", version="0.4.2",
+app = FastAPI(title="llm-gateway", version="0.4.3",
               description="省钱版 OpenAI 兼容网关：按性价比选模型 / 缓存去重 / 多 Key 轮换 / 额度预算")
 app.include_router(config_admin.router)
 
@@ -181,11 +181,12 @@ async def v1_chat(request: Request, x_task: str | None = Header(default=None),
         usage = data.get("usage") or {}
         pt = usage.get("prompt_tokens") or 0
         ct = usage.get("completion_tokens") or 0
+        cached_pt = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
         if not pt:
             pt, ct = pricing.estimate_tokens(payload.get("messages") or [],
                                              (data.get("choices") or [{}])[0].get("message", {}).get("content", ""))
         return _ok(data, route, pt, ct, latency, task, req_hash, payload, cfg,
-                   category=category or "", app=app)
+                   category=category or "", app=app, cached_pt=cached_pt)
     raise HTTPException(502, "全部上游失败：" + last_err)
 
 
@@ -234,14 +235,14 @@ def _stream(u: dict, model_id: str, key: str | None, payload: dict, route: dict,
 
 def _ok(data: dict, route: dict, pt: int, ct: int, latency: int, task: str,
         req_hash: str | None, payload: dict, cfg: dict,
-        category: str = "", app: str = "") -> dict:
+        category: str = "", app: str = "", cached_pt: int = 0) -> dict:
     m = route["model"]
-    cost = pricing.cost_of(m, pt, ct)
+    cost = pricing.cost_of(m, pt, ct, cached_pt, cfg)
     is_free = bool(m["free"]["active"])
     store.record(route["upstream_name"], route["model_id"], route["key_idx"], req_hash or "",
                  pt, ct, cost, False, True, latency, task or "",
                  free=is_free, price_in=m["price_in"], price_out=m["price_out"],
-                 category=category, app=app)
+                 category=category, app=app, cache_read=cached_pt)
     if is_free:  # 计入该模型的免费额度消耗（缓存命中不计，因为没有真调模型）
         store.tick_model(route["upstream_name"], route["model_id"], m["free"]["period"], pt + ct, cost)
         warn = pricing.free_low_alert(route["upstream"], m)
@@ -256,6 +257,7 @@ def _ok(data: dict, route: dict, pt: int, ct: int, latency: int, task: str,
         "task": task, "category": category, "app": app, "reason": route["reason"],
         "cost_cny": cost, "cached": False, "latency_ms": latency,
         "prompt_tokens": pt, "completion_tokens": ct,
+        "cached_prompt_tokens": cached_pt,
         "free_used": is_free, "free_left": route["free_left"],
         "saved_vs_quality_pct": _saved_pct(route, cfg),
     }

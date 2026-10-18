@@ -236,8 +236,29 @@ def find(model_id: str, cfg: dict | None = None) -> dict | None:
     return None
 
 
-def cost_of(m: dict, prompt_tokens: int, completion_tokens: int) -> float:
-    return round(m["price_in"] * prompt_tokens / 1_000_000
+def _cache_ratio(cfg: dict | None = None) -> float:
+    """上游对「缓存命中的输入 token」的计价折扣（相对 price_in）。
+
+    policy.cache_input_ratio 配置；缺省 0.4（百炼 qwen 系/主流平台缓存输入约 2~5 折，
+    取 0.4 让账本偏保守，接近真实扣费）。
+    """
+    try:
+        cfg = cfg or load()
+        v = (cfg.get("policy") or {}).get("cache_input_ratio")
+        return float(v) if v is not None else 0.4
+    except Exception:
+        return 0.4
+
+
+def cost_of(m: dict, prompt_tokens: int, completion_tokens: int,
+            cached_prompt_tokens: int = 0, cfg: dict | None = None) -> float:
+    """按价目算单次成本；cached_prompt_tokens 是命中上游 prompt 缓存的输入部分，
+    按 _cache_ratio 折扣计价（未传时按 0 处理，行为与旧版一致）。"""
+    ratio = _cache_ratio(cfg)
+    cached = min(max(0, cached_prompt_tokens), max(0, prompt_tokens))
+    fresh_in = max(0, prompt_tokens - cached)
+    return round(m["price_in"] * fresh_in / 1_000_000
+                 + m["price_in"] * ratio * cached / 1_000_000
                  + m["price_out"] * completion_tokens / 1_000_000, 6)
 
 

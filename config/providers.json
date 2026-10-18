@@ -7,6 +7,7 @@
     "allow_paid": false,
     "free_first_then_cheapest": true,
     "free_low_watermark": 2000,
+    "cache_input_ratio": 0.4,
     "cache_enabled": true,
     "cache_ttl_seconds": 172800,
     "cache_max_entries": 20000,
