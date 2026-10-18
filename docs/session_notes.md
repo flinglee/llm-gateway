@@ -159,3 +159,25 @@ dashboard/       index.html 控制台（单页，暗色，风格与 DCP 控制�
   `POST /api/probe` 验证连通 → 控制台看实时花费。
 - 让 DCP 的 `llm_base_url` 指向 `http://localhost:8021/v1`，即可让 schema_builder/governor 自动走省钱路由。
 - 尚未做：官方实时价拉取、多实例（SQLite 需换）、按用户维度的配额。
+
+## 余额烧光事故与 v0.4.2 计费修复（2026-10-18，用户余额 ¥39 耗尽 + 欠费 ¥0.04）
+- 事故：`policy.allow_paid` 不存在、`qwen-flash` 等价格占位 0 被 `unit<=0` 启发式误判 0 成本、
+  BSS 计划状态（`sfm_tokenplansolo_public_cn` Normal）被当免费额度证据 →
+  **qwen-max / qwen3.5-397b-a17b / qwen-turbo / qwen-plus / qwen-flash / text-embedding-v3 全被误标免费直连按量付费**，
+  两天账本估算仅 ~¥0.65（价格占位严重低估），真实烧掉 ¥39。
+- 权威数据源最终定为**百炼控制台「免费额度」页**（freetier，Playwright 抓 `.freetier_cache.json`）：
+  实测 82 个模型 VALID（kimi-k3/qwen3.8-27b/qwen3.8-max(-0902)/deepseek-v4-flash(-pro)/qwen3.7-flash 等），
+  上述误标模型控制台状态为 UNKNOWN / 不在清单 = 按量付费。BSS API 不能作为免费证据，已降级为纯兜底。
+- v0.4.2 三层保险（已提交 tag v0.4.2，commit edcaf26）：
+  1. `free_left()`：控制台清单有数据（`freetier.has_data()`）即完全权威——VALID 按剩余，其余状态/不在清单一律 0 免费；
+  2. `candidates()`/`pool_for_category()`：`unit<=0` 启发式废除，改 `platform_free` 显式配置标志
+     （已标：zhipu glm-5.3-flash、硅基流动 Qwen2.5-7B/GLM-4-9B/bge-m3）；
+  3. `policy.allow_paid: false` 硬闸：付费模型一律不进候选池，任何误配置都花不了真钱。
+- 修复后路由池验证：free/cheap/balanced/quality 四档 0 泄漏，quality 头部 = kimi-k3、qwen3.8-max(-0902)、deepseek-v4-pro。
+- 待办：用户充值清 ¥0.04 欠费；如需对账可用 BSS 账单 API 拉真实账单与本地账本核对（价目占位低估是账本对不上的主因）。
+
+### BSS 真实账单对账结论（2026-10-18 实测）
+- 百炼在 BSS 的 ProductCode = **sfm**（bailian/dashscope 都不存在）；明细在 `DescribeInstanceBill`（Granularity 必须用 MONTHLY/DAILY，DAILY 要带 BillingDate；InstanceID 格式 `账号;workspace;模型名;计费项;;0`）。QueryOrders 查不到该订单（OrderType=Subscription 返回空）。
+- **¥39 不是 API 消费**：10-17 有一笔「Token Plan 个人版 Lite 套餐」包月**新购订单**（Item=SubscriptionOrder，原价 ¥60 折扣 ¥21 实付 ¥39 整，InstanceID=sfm_tokenplansolo_public_cn-7mx5083ie05）。余额是被这笔订阅买掉的，不是被网关烧的。
+- **网关误路由的真实损失 = ¥1.05**：10-17 ¥0.31 + 10-18 ¥0.74，主要是 qwen3.5-397b-a17b output ¥0.73 + qwen-max ¥0.29，其余 qwen-plus/flash/character/text-embedding 都是零点几分级。合计 10 月 ¥40.05 → 余额耗尽欠 ¥0.04。
+- v0.4.2 修复后的免费池与 Lite 套餐配额（sfm_tokenplansolo Normal）对上了——控制台 82 个 VALID 模型仍可用，免费薅不受影响。
