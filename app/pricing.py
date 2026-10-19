@@ -183,6 +183,28 @@ def _allow_paid(cfg: dict | None = None) -> bool:
         return True
 
 
+def best_free_for(m: dict, cfg: dict | None = None) -> dict | None:
+    """为付费模型 m 找一个同能力(覆盖其 caps)、同档位下限的免费等效模型。
+
+    用于 allow_paid=false 时：客户端显式指定了付费模型（如 qwen-max），
+    网关不直接扣费，而是透明替换为最便宜的免费等效模型，保证业务不中断且不花钱。
+    优先选完全覆盖所需 caps 的；否则放宽到同 tier 下限的免费模型。
+    """
+    cfg = cfg or load()
+    caps = set((m.get("caps") or "").split(",")) - {""}
+    floor = int(m.get("tier") or 1)
+    free = [x for x in all_models(cfg)
+            if x["enabled"] and _is_free(x) and int(x.get("tier") or 1) >= floor]
+    if caps:
+        covered = [x for x in free
+                   if caps.issubset(set((x.get("caps") or "").split(",")) - {""})]
+        free = covered or free
+    if not free:
+        return None
+    free.sort(key=lambda x: (-int(x.get("tier") or 1), x["unit"]))
+    return free[0]
+
+
 def candidates(min_tier_value: int = 1, cap: str | None = None, cfg: dict | None = None,
                include_free: bool = False) -> list[dict]:
     """候选模型：免费额度优先（同能力、任意档位均纳入），免费用尽后再按档位下限取最便宜付费。

@@ -31,6 +31,36 @@ def is_client_error(e: BaseException) -> bool:
     return isinstance(e, UpstreamError) and 400 <= (e.status or 0) < 500
 
 
+def classify(e: BaseException) -> str:
+    """把上游异常归一成 failover 决策类别（统一错误分类层，对应 free-claude-code-main 的
+    failure_policy 设计）：
+
+    - quota_exhausted : 免费额度/余额耗尽 → 当期剔除免费组（持久），不再反复重试失败
+    - auth            : 401/403 鉴权失败（Key 失效）→ 冷却该 Key 并告警，避免反复打失效 Key
+    - client          : 其它 4xx 请求不兼容 → 不冷却，换下一条路由即可
+    - rate_limited    : 429 限流 → 短冷却
+    - overloaded      : 503/502/服务器忙 → 短冷却
+    - network         : 连接/超时/读超时等瞬时故障 → 短冷却
+    - unknown         : 其它 5xx/无状态码 → 当作瞬时故障短冷却
+
+    下游据此决定「是否冷却、冷却谁、冷却多久」，并让路由自然对冷却模型做单探测恢复
+    （冷却到期后的第一个请求即唯一探测，不再全量重试风暴）。
+    """
+    if not isinstance(e, UpstreamError):
+        return "network"
+    st = e.status or 0
+    msg = ((e.body or "") + " " + str(e.status)).lower()
+    if any(h in msg for h in QUOTA_HINTS):
+        return "quota_exhausted"
+    if st == 429:
+        return "rate_limited"
+    if 400 <= st < 500:
+        return "auth" if st in (401, 403) else "client"
+    if st in (502, 503) or "overload" in msg or "busy" in msg or "服务器忙" in msg:
+        return "overloaded"
+    return "network"
+
+
 def _is_temperature_reject(e: BaseException) -> bool:
     """上游拒绝 temperature 参数（如 kimi-k3 只支持默认采样参数）。"""
     if not isinstance(e, UpstreamError) or e.status != 400:

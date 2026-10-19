@@ -40,6 +40,8 @@
 </header>
 
 <main>
+  <div id="quotaAlert" style="display:none;background:#1e293b;border:1px solid #b45309;border-radius:10px;
+       padding:10px 14px;margin-bottom:14px;font-size:13px;color:#fcd34d;line-height:1.7"></div>
   <div class="stats" id="stats"></div>
 
   <div class="card">
@@ -49,15 +51,17 @@
 
   <div class="card">
   <h3>模型价目表（¥ / 1M tokens）——路由顺序：免费额度优先，其次单价最低</h3>
-  <table><thead><tr><th>上游</th><th>模型</th><th>档位</th><th>输入</th><th>输出</th><th>免费额度(周期)</th><th>已用</th><th>剩余</th><th>可用</th></tr></thead>
+  <table><thead><tr><th>上游</th><th>模型</th><th>档位</th><th>输入</th><th>输出</th><th>免费额度(周期)</th><th>已用</th><th>剩余</th><th>最近使用</th><th>可用</th></tr></thead>
     <tbody id="models"></tbody></table>
   <p class="muted">价格与免费额度写在 config/providers.json（免费额度请按百炼「模型广场/额度管理」实际填写，改完即时生效无需重启）。</p>
   </div>
 
   <div class="card">
     <h3>Key 配额 / 今日已用</h3>
-    <table><thead><tr><th>上游</th><th>Key#</th><th>已用(¥)</th><th>日额度(¥)</th><th>剩余</th><th>冷却中</th></tr></thead>
+    <table><thead><tr><th>上游</th><th>Key#</th><th>已用(¥)</th><th>日额度(¥)</th><th>剩余</th><th>冷却中</th><th>失败类别</th></tr></thead>
       <tbody id="keys"></tbody></table>
+    <table style="margin-top:10px"><thead><tr><th>上游余额</th><th>金额</th><th>说明</th></tr></thead>
+      <tbody id="balances"></tbody></table>
     <div class="row" style="margin-top:10px">
       <button onclick="probe()">探测上游连通性</button>
       <button onclick="clearCache()">清空缓存</button>
@@ -144,6 +148,28 @@ const post = async p => (await fetch(p, {method:'POST'})).json();
 async function loadAll() {
   const [health, price, keys, st] = await Promise.all([
     get('/api/health'), get('/api/price'), get('/api/keys'), get('/api/stats?days=7')]);
+  // 上游官方余额（live_quota.type 声明了接口的平台）
+  get('/api/upstream-balances').then(b => {
+    $('balances').innerHTML = (b.items || []).map(x =>
+      `<tr><td>${x.upstream}</td><td class="${x.balance === null ? 'muted' : 'ok'}">${x.balance === null ? '-' : '¥' + x.balance.toFixed(4)}</td><td class="muted">${x.note || ''}</td></tr>`
+    ).join('') || '<tr><td colspan=3 class="muted">无（在 providers.json 加 live_quota.type 即可接入）</td></tr>';
+  }).catch(() => {});
+
+  // 额度提醒横幅：免费额度用完/过期/恢复 + 当前有额度模型数
+  get('/api/quota/alerts').then(a => {
+    const box = $('quotaAlert');
+    if (!box) return;
+    const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    const when = a.fetched_at ? new Date(a.fetched_at).toLocaleString('zh-CN') : '-';
+    const head = `<b>免费额度</b>：有额度模型 <b>${a.free_models}/${a.total_models}</b> · 清单刷新于 ${when}`;
+    if (a.alerts && a.alerts.length) {
+      box.style.display = 'block';
+      box.innerHTML = head + '<br>' + a.alerts.slice(-6).map(esc).join('<br>');
+    } else {
+      box.style.display = 'block';
+      box.innerHTML = head + '<span class="muted">（暂无变动提醒）</span>';
+    }
+  }).catch(() => {});
   cacheHits = st.daily.reduce((a,d)=>a+(d.hits||0),0);
   const calls = st.daily.reduce((a,d)=>a+(d.calls||0),0);
   const spend = Number(st.spend_today||0);
@@ -167,19 +193,22 @@ async function loadAll() {
     const f = m.free || {};
     const freeCell = f.quota > 0
       ? `<span class="pill ${f.active?'ok':'warn'}">${f.quota.toLocaleString()} (${f.period})</span>`
-      : '<span class="muted">无</span>';
-    const leftCell = f.quota > 0 ? f.left.toLocaleString() : '-';
+      : (m.platform_free ? '<span class="pill ok">平台免费·无限</span>' : '<span class="muted">无</span>');
+    const leftCell = f.quota > 0 ? f.left.toLocaleString() : (m.platform_free ? '∞' : '-');
     const usedCell = f.quota > 0 ? f.used.toLocaleString() : '-';
+    const lu = m.last_used ? new Date(m.last_used * 1000).toLocaleString('zh-CN', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) : '<span class="muted">未用过</span>';
     return `<tr>
     <td>${m.upstream_label}</td><td>${m.id}</td><td>${['','便宜','均衡','高质'][m.tier]||m.tier}</td>
     <td>${m.price_in}</td><td>${m.price_out}</td><td>${freeCell}</td><td>${usedCell}</td><td>${leftCell}</td>
+    <td class="muted">${lu}</td>
     <td class="${m.enabled?'ok':'bad'}">${m.enabled?'可用':'未启用/无Key'}</td></tr>`;
   }).join('');
 
   $('keys').innerHTML = keys.keys.map(k => `<tr><td>${k.upstream}</td><td>#${k.key_idx}</td>
     <td>${k.spend.toFixed(4)}</td><td>${k.quota||'-'}</td>
     <td class="${k.left!==null && k.left<=0?'bad':'ok'}">${k.left===null?'不限':k.left.toFixed(4)}</td>
-    <td class="${k.cooldown?'warn':'muted'}">${k.cooldown?'冷却中':'正常'}</td></tr>`).join('') || '<tr><td colspan=6 class="muted">无</td></tr>';
+    <td class="${k.cooldown?'warn':'muted'}">${k.cooldown?'冷却中':'正常'}</td>
+    <td class="${k.fail_reason?'warn':'muted'}">${k.fail_reason_label||'无'}</td></tr>`).join('') || '<tr><td colspan=7 class="muted">无</td></tr>';
 
   const cats = await get('/api/categories');
   $('cat').innerHTML = '<option value="">不指定分类（用右侧档位）</option>' +

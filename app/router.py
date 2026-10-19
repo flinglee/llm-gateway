@@ -105,9 +105,20 @@ def choose(task: str = "balanced", model: str | None = None,
             raise NoRoute("未知模型：%s" % model)
         if cap and cap not in (m["caps"] or ""):
             raise NoRoute("模型 %s 不支持 %s" % (model, cap))
-        if _over_budget(cfg, cat_name, app, ccfg) and pol.get("budget_action", "downgrade") == "reject":
+        # allow_paid=false 硬闸：显式指定付费模型也不许直接扣费，
+        # 透明替换为同能力最便宜的免费等效模型（保证业务不中断且不花钱）
+        if not pricing._is_free(m) and not pricing._allow_paid(cfg):
+            sub = pricing.best_free_for(m, cfg)
+            if sub:
+                m = sub
+                reason = ("显式指定的 %s 为付费模型，policy.allow_paid=false → "
+                          "已透明替换为免费等效模型 %s" % (model, m["id"]))
+            else:
+                raise NoRoute("模型 %s 为付费模型，当前无同能力免费模型可用"
+                              "（allow_paid=false）。请开启 allow_paid 或改指定免费模型" % model)
+        elif _over_budget(cfg, cat_name, app, ccfg) and pol.get("budget_action", "downgrade") == "reject":
             raise BudgetExceeded("今日预算已用尽（分类 %s）" % (cat_name or "全局"))
-        pool, reason = [m], "显式指定"
+        pool, reason = [m], reason or "显式指定"
     else:
         if _over_budget(cfg, cat_name, app, ccfg):
             if pol.get("budget_action", "downgrade") == "reject":
@@ -175,5 +186,6 @@ def keys_left(cfg: dict | None = None) -> list[dict]:
                 "quota": quota,
                 "left": round(max(0.0, quota - store.key_spend(u["name"], i)), 6) if quota else None,
                 "cooldown": store.in_cooldown(u["name"], i),
+                "fail_reason": store.key_fail_reason(u["name"], i),
             })
     return out

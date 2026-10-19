@@ -173,8 +173,7 @@ def get_model_quota(model_id: str, upstream_type: str | None = None) -> dict | N
                 _api = None
         fresh = _api and (time.time() * 1000 - _api.get("fetched_at", 0)) < TTL_SECONDS * 1000
         if not fresh and not _refreshing():
-            _mark_refreshing()
-            _spawn_refresh()
+            spawn_refresh_with_alerts()
         q = (_api or {}).get("quotas", {}).get(model_id)
         return dict(q) if q else None
 
@@ -227,6 +226,161 @@ def login_once() -> bool:
             return False
     fetch_once()
     return ok
+
+
+# ---------------- 刷新调度 + 额度变动提醒 ----------------
+def cache_snapshot() -> dict | None:
+    """读当前缓存文件（供刷新前后对比，检测额度变动）。"""
+    try:
+        return json.load(open(CACHE, encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def spawn_refresh_blocking(timeout: int = 240) -> bool:
+    """阻塞式**子进程**刷新：浏览器/Playwright 全在子进程，主进程零阻塞。
+
+    不捕获子进程输出——它的进度/摘要直接打进网关日志，方便排查。
+    """
+    try:
+        r = subprocess.run([sys.executable, os.path.abspath(__file__)], timeout=timeout)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def spawn_refresh_with_alerts() -> None:
+    """惰性刷新（缓存过期且有流量时）：子进程刷新 + 完成后对比前后清单打额度提醒。
+
+    子进程输出被捕获（避免刷屏）；提醒照常打印并持久化。
+    """
+    prev = cache_snapshot()
+    _mark_refreshing()
+
+    def run():
+        try:
+            subprocess.run([sys.executable, os.path.abspath(__file__)], timeout=240,
+                           capture_output=True)
+        except Exception:
+            pass
+        finally:
+            _refreshing_flag[0] = False
+        try:
+            cur = cache_snapshot()
+            if cur and (not prev or cur.get("fetched_at") != (prev or {}).get("fetched_at")):
+                al = diff_alerts(prev, cur)
+                if al:
+                    save_alerts(al)
+                    for a in al:
+                        print("[额度提醒] " + a, flush=True)
+        except Exception as e:
+            print("[额度提醒] 对比异常:", repr(e)[:120], flush=True)
+
+    threading.Thread(target=run, daemon=True, name="free-quota-lazy").start()
+
+
+def diff_alerts(prev: dict | None, cur: dict) -> list[str]:
+    """对比刷新前后清单，生成额度变动提醒（用完/过期/恢复/首次清单）。"""
+    out = []
+    pq = (prev or {}).get("quotas") or {}
+    cq = (cur or {}).get("quotas") or {}
+    for mid, v in cq.items():
+        rem = int(v.get("remaining") or 0)
+        st = (v.get("status") or "").upper()
+        p = pq.get(mid) or {}
+        prem = int(p.get("remaining") or 0)
+        pst = (p.get("status") or "").upper()
+        if prem > 0 and rem <= 0:
+            out.append("模型 %s 免费额度已用完（剩 0）" % mid)
+        elif pst == "VALID" and st in ("EXHAUSTED", "EXPIRED"):
+            out.append("模型 %s 免费额度状态变为 %s" % (mid, st))
+        elif prem <= 0 and rem > 0 and pst:
+            out.append("模型 %s 免费额度恢复/新增：%d tokens" % (mid, rem))
+    if not pq and cq:
+        n = sum(1 for v in cq.values() if int(v.get("remaining") or 0) > 0)
+        out.append("首次拿到额度清单：共 %d 个模型，其中 %d 个有免费额度" % (len(cq), n))
+    return out
+
+
+def save_alerts(alerts: list) -> None:
+    """提醒并入缓存文件持久化（保留最近 50 条；同一条提醒每天最多记一次）。"""
+    if not alerts:
+        return
+    cur = cache_snapshot() or {}
+    old = cur.get("alerts") or []
+    day = time.strftime("%m-%d")
+    seen = {a.split("] ", 1)[-1] + "|" + a[1:7] for a in old if a.startswith("[")}
+    stamp = time.strftime("%m-%d %H:%M")
+    for a in alerts:
+        if (a + "|" + day) not in seen:
+            old.append("[%s] %s" % (stamp, a))
+    cur["alerts"] = old[-50:]
+    try:
+        json.dump(cur, open(CACHE, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+
+
+def alerts(limit: int = 30) -> list:
+    c = cache_snapshot() or {}
+    return list((c.get("alerts") or [])[-limit:])
+
+
+# ---------------- 免费模型自动登记（免手填 providers.json） ----------------
+_NON_CHAT_HINTS = ("embedding", "rerank", "asr", "tts", "omni", "realtime", "audio",
+                   "livetranslate", "video", "ocr", "wan", "vsvr", "vlm", "matrx")
+
+
+def sync_models_to_config() -> dict:
+    """把 freetier 清单里「有免费额度」的对话类模型自动登记进 providers.json（bailian）。
+
+    - 只新增：配置里已有的模型一律不动（人工改的价格/档位/开关不覆盖）；
+    - 价格填保守占位（入 2 / 出 8 每百万）：有免费额度时路由本就免费优先、价格不参与；
+      额度耗尽后它按普通付费模型参与"最便宜"竞争，占位价不至于被误选成最低价；
+    - 非对话类（embedding/rerank/asr/tts/omni/audio 等）自动跳过，防止路由到不能对话的模型。
+    """
+    from .config import ROOT
+    cur = cache_snapshot() or {}
+    path = ROOT / "config" / "providers.json"
+    try:
+        prov = json.load(open(path, encoding="utf-8"))
+    except Exception as e:
+        return {"ok": False, "error": "providers.json 读取失败: %s" % str(e)[:80]}
+    added, skipped = [], 0
+    touched = False
+    for u in prov.get("upstreams", []):
+        if u.get("name") != "bailian":
+            continue
+        models = u.setdefault("models", [])
+        have = {m.get("id") for m in models}
+        for mid, v in (cur.get("quotas") or {}).items():
+            if v.get("status") != "VALID" or (v.get("remaining") or 0) <= 0:
+                continue
+            low = mid.lower()
+            if any(h in low for h in _NON_CHAT_HINTS):
+                skipped += 1
+                continue
+            if mid in have:
+                continue
+            models.append({
+                "id": mid, "label": mid, "tier": 1,
+                "price_in": 2.0, "price_out": 8.0,
+                "free_quota_tokens": int(v.get("remaining") or 0),
+                "free_period": "month",
+                "auto": True,
+                "note": "freetier 自动登记 %s（占位价，额度耗尽后可人工改真实价）"
+                        % time.strftime("%m-%d"),
+            })
+            have.add(mid)
+            added.append(mid)
+        touched = True
+        break
+    if added:
+        try:
+            json.dump(prov, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        except Exception as e:
+            return {"ok": False, "error": "providers.json 写入失败: %s" % str(e)[:80]}
+    return {"ok": touched, "added": added, "skipped_nonchat": skipped}
 
 
 if __name__ == "__main__":

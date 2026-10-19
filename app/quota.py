@@ -35,6 +35,50 @@ def _expand(v: str) -> str:
     return v
 
 
+def upstream_balance(u: dict) -> dict:
+    """查上游账户余额（live_quota.type 选接口）：siliconflow / deepseek 已支持。
+
+    其它平台后续要接入：在 providers.json 该上游加 "live_quota": {"type": "..."}
+    再在这里加一个分支即可（框架可扩展）。智谱暂无公开余额接口，
+    其免费模型直接标 platform_free=true 即视为无限免费。
+    """
+    t = (u.get("live_quota") or {}).get("type") or ""
+    keys = u.get("api_keys") or ([u["api_key"]] if u.get("api_key") else [])
+    key = keys[0] if keys else ""
+    name = u.get("name")
+    if not key:
+        return {"upstream": name, "balance": None, "note": "未配置 Key"}
+    try:
+        if t == "siliconflow":
+            req = urllib.request.Request("https://api.siliconflow.cn/v1/user/info",
+                                         headers={"Authorization": "Bearer " + key})
+            d = json.loads(urllib.request.urlopen(req, timeout=8).read().decode())
+            bal = float((d.get("data") or {}).get("balance") or 0)
+            return {"upstream": name, "balance": bal, "note": "CNY"}
+        if t == "deepseek":
+            req = urllib.request.Request("https://api.deepseek.com/user/balance",
+                                         headers={"Authorization": "Bearer " + key})
+            d = json.loads(urllib.request.urlopen(req, timeout=8).read().decode())
+            infos = d.get("balance_infos") or [{}]
+            return {"upstream": name, "balance": float(infos[0].get("total_balance") or 0),
+                    "note": infos[0].get("currency") or ""}
+        return {"upstream": name, "balance": None, "note": "该平台暂无公开余额接口"}
+    except Exception as e:
+        return {"upstream": name, "balance": None, "note": "查询失败: %s" % repr(e)[:60]}
+
+
+def all_upstream_balances(cfg: dict) -> list:
+    """所有已启用且声明了 live_quota.type 的上游余额（逐个实查，短超时）。"""
+    out = []
+    for u in (cfg.get("upstreams") or []):
+        if not u.get("enabled"):
+            continue
+        if not ((u.get("live_quota") or {}).get("type") or ""):
+            continue
+        out.append(upstream_balance(u))
+    return out
+
+
 def live_remaining(upstream: dict, model_id: str) -> int | None:
     """返回该模型真实剩余免费 tokens（拿不到返回 None）。"""
     cfg = upstream.get("live_quota") or {}

@@ -3,9 +3,13 @@
 """
 from __future__ import annotations
 
+import base64
+import io
 import json
 import os
+import re
 import time
+import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -17,6 +21,64 @@ from . import categories, config_admin, pricing, router, store, upstream, quota
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "dashboard"
 
+
+# ---------------- 多模态文件：OOXML(docx/pptx/xlsx)本地抽文本 ----------------
+# 上游免费模型基本只支持 text/image_url/video，且百炼只认 PDF 文件；
+# 把 docx/pptx/xlsx 这类压缩包在网关本地抽成纯文本再转发，免费池全可处理，
+# 避免「传 docx 全被拒 → 全部路由失败 → 502」。零三方依赖（OOXML 本质是个 zip）。
+_OOXML_TEXT_EXT = (".docx", ".pptx", ".xlsx", ".xls", ".odt")
+
+
+def _ooxml_text(file_b64: str) -> str | None:
+    """从 OOXML(zip) 抽文本；失败返回 None。"""
+    try:
+        raw = base64.b64decode(file_b64)
+        z = zipfile.ZipFile(io.BytesIO(raw))
+        texts = []
+        for n in z.namelist():
+            if not (n.endswith(".xml") and
+                    ("document.xml" in n or "slide" in n or "notesSlide" in n
+                     or "sharedStrings.xml" in n or "sheet" in n)):
+                continue
+            try:
+                x = z.read(n).decode("utf-8", "replace")
+            except Exception:
+                continue
+            parts = re.findall(r"<(?:w:t|a:t|text)[^>]*>(.*?)</(?:w:t|a:t|text)>",
+                               x, re.S)
+            texts.append("".join(parts) if parts
+                         else re.sub(r"<[^>]+>", " ", x))
+        joined = "\n".join(t for t in texts if t.strip())
+        return joined or None
+    except Exception:
+        return None
+
+
+def _normalize_files(messages: list) -> list:
+    """OOXML 文件内容就地转纯文本 part；PDF/图片保持 file 原样（上游原生支持）。"""
+    out = []
+    for m in (messages or []):
+        content = m.get("content")
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "file":
+                    f = part.get("file") or {}
+                    name = (f.get("filename") or "").lower()
+                    data = f.get("file_data") or ""
+                    if name.endswith(_OOXML_TEXT_EXT) and "base64," in data:
+                        txt = _ooxml_text(data.split("base64,", 1)[1])
+                        if txt:
+                            parts.append({"type": "text",
+                                          "text": "[文件 %s 提取文本]\n%s"
+                                          % (f.get("filename"), txt[:20000])})
+                            continue
+                parts.append(part)
+            m = dict(m)
+            m["content"] = parts
+        out.append(m)
+    return out
+
 # 常见 OpenAI/Anthropic 模型名 → 省钱档位：老客户端改 base_url 即可自动省钱
 ALIAS_TASK = {
     "auto": None, "gateway": None, "default": None,
@@ -26,7 +88,7 @@ ALIAS_TASK = {
 }
 AUTO_PREFIX = ("auto", "auto-cheap", "auto-balanced", "auto-quality")
 
-app = FastAPI(title="llm-gateway", version="0.4.4",
+app = FastAPI(title="llm-gateway", version="0.4.5",
               description="省钱版 OpenAI 兼容网关：按性价比选模型 / 缓存去重 / 多 Key 轮换 / 额度预算")
 app.include_router(config_admin.router)
 
@@ -46,14 +108,28 @@ def _free_quota_daemon():
     _t.sleep(20)          # 等服务先起来
     while True:
         try:
-            c = freetier.fetch_once()
-            if c:
-                q = c.get("quotas") or {}
+            # 全程子进程跑浏览器（拉起→抓取→写缓存），主进程/事件循环零阻塞，
+            # 彻底消除"刷新期间网关卡 1~2 分钟"的问题。
+            prev = freetier.cache_snapshot()
+            ok = freetier.spawn_refresh_blocking()
+            cur = freetier.cache_snapshot()
+            if ok and cur:
+                q = cur.get("quotas") or {}
                 valid = [k for k, v in q.items()
                          if v.get("status") == "VALID" and (v.get("remaining") or 0) > 0]
                 print("[freetier] 每日刷新完成: 共%d个模型, 有免费额度%d个" % (len(q), len(valid)),
                       flush=True)
-            else:
+                alerts = freetier.diff_alerts(prev, cur)
+                if alerts:
+                    freetier.save_alerts(alerts)
+                    for a in alerts:
+                        print("[额度提醒] " + a, flush=True)
+                sync = freetier.sync_models_to_config()
+                if sync.get("added"):
+                    names = "、".join(sync["added"][:8]) + ("…" if len(sync["added"]) > 8 else "")
+                    print("[额度同步] 自动登记 %d 个免费模型: %s"
+                          % (len(sync["added"]), names), flush=True)
+            elif not ok:
                 print("[freetier] 刷新失败(登录态可能过期，本次沿用旧缓存)。"
                       "重新登录方法: 运行 python -c \"import app.freetier as f; f.login_once()\" "
                       "在弹出窗口完成登录即可", flush=True)
@@ -117,6 +193,10 @@ async def v1_chat(request: Request, x_task: str | None = Header(default=None),
         task = None
     elif low in categories.names(ccfg):
         category, task = low, None
+    elif x_task and x_task in categories.names(ccfg):
+        # 客户端用 x-task 头传分类名（如 schema_build/analysis）→ 当分类处理，
+        # 精确命中 categories.json 里该分类的档位+能力池（DCP 即此用法）。
+        category, task = x_task, None
     elif low.startswith("auto"):
         task = low.split("-", 1)[1] if "-" in low else None
         task = task or x_task or pol.get("default_task", "balanced")
@@ -143,6 +223,9 @@ async def v1_chat(request: Request, x_task: str | None = Header(default=None),
 
     payload = {k: v for k, v in body.items() if k not in ("model", "stream")}
     payload.setdefault("temperature", 0.2)
+    # 文件归一化：OOXML(docx/pptx/xlsx)本地抽文本 → 任意免费文本模型可处理；PDF 保持原样
+    if payload.get("messages"):
+        payload["messages"] = _normalize_files(payload["messages"])
 
     # 2) 缓存（非流式 + 低温度）：命中直接返回，零花费
     req_hash = None
@@ -173,13 +256,7 @@ async def v1_chat(request: Request, x_task: str | None = Header(default=None),
                 first = b""
             except Exception as e:
                 last_err = repr(e)[:300]
-                if upstream.is_quota_exhausted_error(e):
-                    store.mark_free_exhausted(route["upstream_name"], mid,
-                                              route["model"]["free"]["period"])
-                if upstream.is_client_error(e):
-                    continue  # 请求参数与该模型不兼容 → 不冷却，换下一条路由
-                store.mark_fail(u["name"], kidx, int(pol.get("cooldown_seconds") or 0))
-                store.mark_model_fail(u["name"], mid, int(pol.get("cooldown_seconds") or 0))
+                _on_attempt_error(e, route, pol)
                 continue
             return _stream(u, mid, key, payload, route, task, cfg,
                            category=category or "", app=app, gen=gen, first=first)
@@ -187,16 +264,7 @@ async def v1_chat(request: Request, x_task: str | None = Header(default=None),
             data = upstream.chat(u, mid, key, payload)
         except Exception as e:
             last_err = repr(e)[:300]
-            if upstream.is_quota_exhausted_error(e):
-                # 百炼确认该模型免费额度耗尽 → 当期永久剔除免费组（reactive 对齐，避免反复重试失败）
-                store.mark_free_exhausted(route["upstream_name"], mid, route["model"]["free"]["period"])
-            if upstream.is_client_error(e):
-                # 4xx 是请求参数与该模型不兼容（如 kimi-k3 拒绝 temperature），已在 upstream 层
-                # 自动去参重试过；仍失败说明该模型确实吃不下这个请求 → 不冷却模型（确定性错误），
-                # 但要换下一条路由继续，故只记 err 不 mark_fail/mark_model_fail
-                continue
-            store.mark_fail(u["name"], kidx, int(pol.get("cooldown_seconds") or 0))
-            store.mark_model_fail(u["name"], mid, int(pol.get("cooldown_seconds") or 0))
+            _on_attempt_error(e, route, pol)
             continue
         latency = int((time.time() - t0) * 1000)
         usage = data.get("usage") or {}
@@ -209,6 +277,35 @@ async def v1_chat(request: Request, x_task: str | None = Header(default=None),
         return _ok(data, route, pt, ct, latency, task, req_hash, payload, cfg,
                    category=category or "", app=app, cached_pt=cached_pt)
     raise HTTPException(502, "全部上游失败：" + last_err)
+
+
+def _on_attempt_error(e: Exception, route: dict, pol: dict) -> None:
+    """一次路由尝试失败后的统一处置（由 upstream.classify 决定 failover 行为）。
+
+    分类 → 动作：
+    - quota_exhausted : 百炼确认该模型免费额度耗尽 → 当期永久剔除免费组 + 模型冷却
+    - auth            : 401/403（Key 失效）→ 冷却该 Key（更久，避免反复打失效 Key）+ 模型冷却
+    - client          : 其它 4xx 请求不兼容 → 不冷却，调用方循环会换下一条路由
+    - 其它(限流/过载/网络/未知) : Key + 模型都按策略短时冷却
+
+    路由层已把冷却中的模型/Key 排除出候选池，冷却到期后的首个请求即唯一探测——不会全量重试风暴。
+    """
+    cat = upstream.classify(e)
+    up, mid = route["upstream_name"], route["model_id"]
+    period = (route.get("model") or {}).get("free", {}).get("period") or "month"
+    cd = int(pol.get("cooldown_seconds") or 0)
+    if cat == "quota_exhausted":
+        store.mark_free_exhausted(up, mid, period)
+        store.mark_model_fail(up, mid, cd, reason=cat)
+        store.set_key_reason(up, route["key_idx"], cat)  # 平台/模型级额度耗尽也显式标注在 Key 上
+    elif cat == "client":
+        pass  # 确定性请求不兼容，换路由即可
+    elif cat == "auth":
+        store.mark_fail(up, route["key_idx"], max(cd, 600), reason=cat)  # 失效 Key 冷却更久
+        store.mark_model_fail(up, mid, cd, reason=cat)
+    else:  # rate_limited / overloaded / network / unknown
+        store.mark_fail(up, route["key_idx"], cd, reason=cat)
+        store.mark_model_fail(up, mid, cd, reason=cat)
 
 
 def _stream(u: dict, model_id: str, key: str | None, payload: dict, route: dict, task: str, cfg: dict,
@@ -309,6 +406,7 @@ async def v1_embeddings(request: Request, x_app_id: str | None = Header(default=
     ccfg = router_compat_categories()
     app = body.get("app") or x_app_id or query_app(request) \
         or categories.app_by_key((authorization or "").replace("Bearer ", ""), ccfg) or ""
+    pol = cfg.get("policy") or {}
     want = body.get("model")
     texts = body.get("input")
     texts = [texts] if isinstance(texts, str) else (texts or [])
@@ -326,9 +424,7 @@ async def v1_embeddings(request: Request, x_app_id: str | None = Header(default=
             data = upstream.embeddings(route["upstream"], route["model_id"], route["key"], texts)
         except Exception as e:
             last_err = repr(e)[:200]
-            if upstream.is_quota_exhausted_error(e):
-                store.mark_free_exhausted(route["upstream_name"], route["model_id"],
-                                          route["model"]["free"]["period"])
+            _on_attempt_error(e, route, pol)  # 统一错误分类层：额度耗尽/Key失效/限流/过载一并处置
             continue
         usage = data.get("usage") or {}
         pt = usage.get("prompt_tokens") or sum(pricing.estimate_tokens([{"content": t}])[0] for t in texts)
@@ -363,7 +459,13 @@ def api_health():
 @app.get("/api/price")
 def api_price():
     cfg = router_compat_cfg()
-    return {"models": pricing.all_models(cfg), "recommend": pricing.recommend_table(cfg),
+    models = pricing.all_models(cfg)
+    # 附带最近使用时间，并按「最新使用在前」排序（从没调用过的排最后，保持原配置顺序兜底）
+    last = store.last_used_by_model()
+    for m in models:
+        m["last_used"] = last.get(m["id"])
+    models.sort(key=lambda m: (m["last_used"] is None, -(m["last_used"] or 0)))
+    return {"models": models, "sorted_by": "last_used",
             "spend_today": round(store.spend_today(), 6),
             "budget": (cfg.get("policy") or {}).get("daily_budget_cny")}
 
@@ -377,7 +479,18 @@ def api_recommend(task: str = "balanced"):
 
 @app.get("/api/keys")
 def api_keys():
-    return {"keys": router.keys_left(), "spend_today": round(store.spend_today(), 6)}
+    keys = []
+    for k in router.keys_left():
+        reason = k.get("fail_reason") or ""
+        keys.append({**k, "fail_reason_label": FAIL_REASON_LABELS.get(reason, reason)})
+    return {"keys": keys, "spend_today": round(store.spend_today(), 6),
+            "fail_reason_labels": FAIL_REASON_LABELS}
+
+
+FAIL_REASON_LABELS = {
+    "quota_exhausted": "额度耗尽", "auth": "鉴权失败(Key失效)", "rate_limited": "限流(429)",
+    "overloaded": "过载(5xx)", "network": "网络/超时", "client": "请求不兼容", "": "",
+}
 
 
 @app.get("/api/categories")
@@ -499,6 +612,53 @@ def api_quota_debug():
                                    "active": fi["active"], "low": fi.get("low"),
                                    "used": fi["used"]}
     return {"raw": raw, "free_plans": plans, "free_low_watermark": watermark, "models": models}
+
+
+@app.get("/api/quota/alerts")
+def api_quota_alerts():
+    """免费额度变动提醒：哪个模型用完/过期/恢复（最近一次刷新对比得出）。"""
+    from . import freetier
+    c = freetier.cache_snapshot() or {}
+    q = c.get("quotas") or {}
+    free_models = sum(1 for v in q.values()
+                      if v.get("status") == "VALID" and (v.get("remaining") or 0) > 0)
+    return {"alerts": freetier.alerts(30),
+            "fetched_at": c.get("fetched_at"),
+            "free_models": free_models, "total_models": len(q)}
+
+
+@app.get("/api/quota/free-list")
+def api_quota_free_list():
+    """百炼控制台当前所有「有免费额度」的模型清单（按剩余量降序）。
+
+    数据来自 freetier 缓存（控制台实抓），与 providers.json 里是否登记无关——
+    这里能看到你账号下全部有额度的模型（如 83 个），可挑着往 providers.json 加。
+    """
+    from . import freetier
+    c = freetier.cache_snapshot() or {}
+    items = [{"model": k, "remaining": int(v.get("remaining") or 0),
+              "total": v.get("total"), "expire": v.get("expire"), "status": v.get("status")}
+             for k, v in (c.get("quotas") or {}).items()
+             if v.get("status") == "VALID" and (v.get("remaining") or 0) > 0]
+    items.sort(key=lambda x: -x["remaining"])
+    return {"count": len(items), "fetched_at": c.get("fetched_at"), "items": items}
+
+
+@app.get("/api/upstream-balances")
+def api_upstream_balances():
+    """已启用上游的官方账户余额（live_quota.type 声明接口的才查；短超时）。"""
+    from . import quota as quota_mod
+    return {"items": quota_mod.all_upstream_balances(router_compat_cfg())}
+
+
+@app.post("/api/quota/sync-models")
+def api_quota_sync_models():
+    """手动触发：把 freetier 清单里有免费额度的对话类模型登记进 providers.json。
+
+    每日刷新后也会自动跑一次；这里供改完配置后手动补。只新增不覆盖人工配置。
+    """
+    from . import freetier
+    return freetier.sync_models_to_config()
 
 
 @app.exception_handler(HTTPException)

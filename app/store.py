@@ -63,6 +63,12 @@ def _migrate(c: sqlite3.Connection):
     mcols = [r[1] for r in c.execute("pragma table_info(modelstate)")]
     if "free_exhausted" not in mcols:
         c.execute("ALTER TABLE modelstate ADD COLUMN free_exhausted INTEGER DEFAULT 0")
+    # keystate / modelstate 加失败类别（统一错误分类层 classify 的结果），便于一眼看出是限流还是 Key 失效
+    for table, col, decl in (("keystate", "fail_reason", "TEXT DEFAULT ''"),
+                             ("modelstate", "fail_reason", "TEXT DEFAULT ''")):
+        cols = [r[1] for r in c.execute("pragma table_info(%s)" % table)]
+        if col not in cols:
+            c.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, col, decl))
 
 
 def today() -> str:
@@ -119,6 +125,12 @@ def model_tokens(upstream: str, model: str, period: str) -> int:
     return int(r["tokens"]) if r else 0
 
 
+def last_used_by_model() -> dict[str, float]:
+    """各模型最近一次调用的时间戳（控制台按「最新使用」排序用；无调用记录的模型不在结果里）。"""
+    rows = db().execute("SELECT model, MAX(ts) AS t FROM usage GROUP BY model").fetchall()
+    return {r["model"]: float(r["t"]) for r in rows if r["t"] is not None}
+
+
 def mark_free_exhausted(upstream: str, model: str, period: str):
     """百炼报错确认该模型免费额度已耗尽：当期永久标记为「免费组不可用」（reactive 对齐）。
 
@@ -161,18 +173,40 @@ def key_spend(upstream: str, key_idx: int) -> float:
     return float(r["spend"] if r else 0.0)
 
 
-def mark_fail(upstream: str, key_idx: int, cooldown_seconds: int, cool: bool = False):
+def mark_fail(upstream: str, key_idx: int, cooldown_seconds: int, cool: bool = False,
+              reason: str | None = None):
     """记录失败次数。默认只计数不冷却——单 Key 上游冷 Key 等于冷全部模型；
-    模型级失败用 mark_model_fail 单独冷那个模型。cool=True 仅用于整 Key 级故障（预留）。"""
+    模型级失败用 mark_model_fail 单独冷那个模型。cool=True 仅用于整 Key 级故障（预留）。
+    reason：统一错误分类层 classify 的类别（quota_exhausted/auth/rate_limited/overloaded/network…），
+    写入 keystate.fail_reason 供 /api/keys 展示。"""
     c = db()
     with _LOCK:
-        c.execute("INSERT INTO keystate (upstream,key_idx,day,spend,calls,fails,cooldown_until) "
-                  "VALUES (?,?,?,0,0,1,0) ON CONFLICT(upstream,key_idx,day) DO UPDATE SET "
-                  "fails=fails+1",
-                  (upstream, key_idx, today()))
+        c.execute("INSERT INTO keystate (upstream,key_idx,day,spend,calls,fails,cooldown_until,fail_reason) "
+                  "VALUES (?,?,?,0,0,1,0,?) ON CONFLICT(upstream,key_idx,day) DO UPDATE SET "
+                  "fails=fails+1, fail_reason=excluded.fail_reason",
+                  (upstream, key_idx, today(), reason or ""))
         if cool:
             c.execute("UPDATE keystate SET cooldown_until=? WHERE upstream=? AND key_idx=? AND day=?",
                       (time.time() + max(0, cooldown_seconds), upstream, key_idx, today()))
+        c.commit()
+
+
+def key_fail_reason(upstream: str, key_idx: int) -> str:
+    """该 Key 今日最近一次失败的错误类别（空串=无失败记录）。"""
+    r = db().execute("SELECT fail_reason FROM keystate WHERE upstream=? AND key_idx=? AND day=?",
+                     (upstream, key_idx, today())).fetchone()
+    return (r["fail_reason"] or "") if r else ""
+
+
+def set_key_reason(upstream: str, key_idx: int, reason: str | None) -> None:
+    """只写 Key 的失败类别（不增 fails 计数）——用于额度耗尽这类「模型/平台级、非 Key 故障」，
+    仍让 /api/keys 显示出来，方便一眼看出是限流/Key失效/额度耗尽。"""
+    c = db()
+    with _LOCK:
+        c.execute("INSERT INTO keystate (upstream,key_idx,day,spend,calls,fails,cooldown_until,fail_reason) "
+                  "VALUES (?,?,?,0,0,0,0,?) ON CONFLICT(upstream,key_idx,day) DO UPDATE SET "
+                  "fail_reason=excluded.fail_reason",
+                  (upstream, key_idx, today(), reason or ""))
         c.commit()
 
 
@@ -186,8 +220,20 @@ def in_cooldown(upstream: str, key_idx: int) -> bool:
 _MODEL_COOL: dict[tuple, float] = {}
 
 
-def mark_model_fail(upstream: str, model: str, cooldown_seconds: int):
+def mark_model_fail(upstream: str, model: str, cooldown_seconds: int, reason: str | None = None):
     _MODEL_COOL[(upstream, model)] = time.time() + max(0, cooldown_seconds)
+    # 失败类别也落 modelstate（便于排查某模型为何被冷却），跨周期无需保留
+    try:
+        c = db()
+        with _LOCK:
+            c.execute("UPDATE modelstate SET fail_reason=? WHERE upstream=? AND model=? AND period=?",
+                      (reason or "", upstream, model, period_key("month")))
+            if c.rowcount == 0:
+                c.execute("INSERT INTO modelstate (upstream,model,period,tokens,calls,spend,fail_reason) "
+                          "VALUES (?,?,?,0,0,0,?)", (upstream, model, period_key("month"), reason or ""))
+            c.commit()
+    except Exception:
+        pass
 
 
 def model_in_cooldown(upstream: str, model: str) -> bool:

@@ -22,9 +22,9 @@
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "api_keys": [
         "${BAILIAN_API_KEY}"
-             ],
+      ],
       "daily_quota_cny": 3.0,
-      "timeout": 120,
+      "timeout": 300,
       "enabled": true,
       "live_quota": {
         "type": "aliyun-bss",
@@ -49,9 +49,7 @@
           "tier": 1,
           "price_in": 0.3,
           "price_out": 0.6,
-          "caps": "json,zh",
-          "free_quota_tokens": 1000000,
-          "free_period": "forever"
+          "caps": "json,zh"
         },
         {
           "id": "qwen-plus",
@@ -478,10 +476,7 @@
           "price_in": 4.0,
           "price_out": 16.0,
           "caps": "json,zh,reason",
-          "free_quota_tokens": 1000000,
-          "free_period": "month",
-          "free_expire": "2026-11-18",
-          "note": "非 qwen 系，无 BSS 计划映射，按本地记账 + reactive 403 兜底"
+          "note": "非 qwen 系、稳定性不如原生 qwen，已移出 auto 免费首选（allow_paid=false 下不进池），避免挂起拖垮自动切换；需高质量时仍可手动指定 model=kimi-k3"
         },
         {
           "id": "deepseek-v4-flash-0731",
@@ -490,10 +485,7 @@
           "price_in": 1.0,
           "price_out": 4.0,
           "caps": "json,zh,reason",
-          "free_quota_tokens": 1000000,
-          "free_period": "month",
-          "free_expire": "2026-10-31",
-          "note": "非 qwen 系，免费到期 2026-10-31"
+          "note": "非 qwen 系，已移出 auto 免费首选（避免挂起拖垮自动切换）；需时可手动指定"
         },
         {
           "id": "deepseek-v4-pro-0813",
@@ -502,10 +494,612 @@
           "price_in": 1.0,
           "price_out": 4.0,
           "caps": "json,zh,reason",
+          "note": "Pro 级推理模型；已移出 auto 免费首选（避免挂起拖垮自动切换）；需时可手动指定"
+        },
+        {
+          "id": "qwen-mt-uni",
+          "label": "qwen-mt-uni",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
           "free_quota_tokens": 1000000,
           "free_period": "month",
-          "free_expire": "2026-11-13",
-          "note": "Pro 级推理模型，免费档中的高质量选项；价格估算"
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhide-v1",
+          "label": "sambert-zhide-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "paraformer-v2",
+          "label": "paraformer-v2",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 36000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhida-v1",
+          "label": "sambert-zhida-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhishu-v1",
+          "label": "sambert-zhishu-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhiyue-v1",
+          "label": "sambert-zhiyue-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-eva-v1",
+          "label": "sambert-eva-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-beth-v1",
+          "label": "sambert-beth-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhiye-v1",
+          "label": "sambert-zhiye-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhiya-v1",
+          "label": "sambert-zhiya-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-indah-v1",
+          "label": "sambert-indah-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-cindy-v1",
+          "label": "sambert-cindy-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhiying-v1",
+          "label": "sambert-zhiying-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhistella-v1",
+          "label": "sambert-zhistella-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-perla-v1",
+          "label": "sambert-perla-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhihao-v1",
+          "label": "sambert-zhihao-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhilun-v1",
+          "label": "sambert-zhilun-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhichu-v1",
+          "label": "sambert-zhichu-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhimao-v1",
+          "label": "sambert-zhimao-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhigui-v1",
+          "label": "sambert-zhigui-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhinan-v1",
+          "label": "sambert-zhinan-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhixiao-v1",
+          "label": "sambert-zhixiao-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhimo-v1",
+          "label": "sambert-zhimo-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhiming-v1",
+          "label": "sambert-zhiming-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-brian-v1",
+          "label": "sambert-brian-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-betty-v1",
+          "label": "sambert-betty-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-donna-v1",
+          "label": "sambert-donna-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhiru-v1",
+          "label": "sambert-zhiru-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-hanna-v1",
+          "label": "sambert-hanna-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "paraformer-8k-v2",
+          "label": "paraformer-8k-v2",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 36000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhiqi-v1",
+          "label": "sambert-zhiqi-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhiting-v1",
+          "label": "sambert-zhiting-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhiyuan-v1",
+          "label": "sambert-zhiyuan-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhixiang-v1",
+          "label": "sambert-zhixiang-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhijia-v1",
+          "label": "sambert-zhijia-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhifei-v1",
+          "label": "sambert-zhifei-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-clara-v1",
+          "label": "sambert-clara-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-waan-v1",
+          "label": "sambert-waan-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-camila-v1",
+          "label": "sambert-camila-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhiwei-v1",
+          "label": "sambert-zhiwei-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhijing-v1",
+          "label": "sambert-zhijing-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-cally-v1",
+          "label": "sambert-cally-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhimiao-emo-v1",
+          "label": "sambert-zhimiao-emo-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhishuo-v1",
+          "label": "sambert-zhishuo-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhiqian-v1",
+          "label": "sambert-zhiqian-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "sambert-zhina-v1",
+          "label": "sambert-zhina-v1",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 30000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "deepseek-v4.1-flash",
+          "label": "deepseek-v4.1-flash",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "deepseek-v4.1-flash-1017",
+          "label": "deepseek-v4.1-flash-1017",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "glm-5.3",
+          "label": "glm-5.3",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "qwen3.8-2.4t-a95b",
+          "label": "qwen3.8-2.4t-a95b",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 1000000,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "qwen-image-2.1-pro",
+          "label": "qwen-image-2.1-pro",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 10,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "qwen-image-3.0",
+          "label": "qwen-image-3.0",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 10,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "qwen-image-3.0-pro",
+          "label": "qwen-image-3.0-pro",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 10,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "qwen-mt-image-2.0",
+          "label": "qwen-mt-image-2.0",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 100,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
+        },
+        {
+          "id": "qwen-image-2.1-turbo",
+          "label": "qwen-image-2.1-turbo",
+          "tier": 1,
+          "price_in": 2.0,
+          "price_out": 8.0,
+          "free_quota_tokens": 10,
+          "free_period": "month",
+          "auto": true,
+          "note": "freetier 自动登记 10-19（占位价，额度耗尽后可人工改真实价）"
         }
       ]
     },
@@ -558,6 +1152,9 @@
       "api_keys": [
         "${DEEPSEEK_API_KEY}"
       ],
+      "live_quota": {
+        "type": "deepseek"
+      },
       "daily_quota_cny": 2.0,
       "timeout": 60,
       "enabled": false,
@@ -580,6 +1177,9 @@
       "api_keys": [
         "${SILICONFLOW_API_KEY}"
       ],
+      "live_quota": {
+        "type": "siliconflow"
+      },
       "daily_quota_cny": 1.0,
       "timeout": 60,
       "enabled": true,

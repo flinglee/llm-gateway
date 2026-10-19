@@ -27,6 +27,30 @@
       "note": "DCP：爬取记录归类到目标表+字段映射，要推理能力"
     },
     {
+      "name": "ontology_build",
+      "label": "本体构建（库说明→本体）",
+      "task": "cheap",
+      "caps": "json",
+      "daily_budget_cny": 1.0,
+      "note": "DCP：库说明 docx→LLM 解析成本体 JSON。结构化输出，用便宜档（快）；此前无此分类会落到 balanced 池慢模型(285s)导致 DCP 120s 超时"
+    },
+    {
+      "name": "source_discovery",
+      "label": "数据源发现（批量）",
+      "task": "cheap",
+      "caps": "json",
+      "daily_budget_cny": 1.0,
+      "note": "DCP：批量发现候选数据源，高频大量，便宜档"
+    },
+    {
+      "name": "source_review",
+      "label": "数据源复核",
+      "task": "cheap",
+      "caps": "json",
+      "daily_budget_cny": 1.0,
+      "note": "DCP：候选源复核/精炼，结构化 JSON；用便宜档避免慢模型拖到超时"
+    },
+    {
       "name": "crawl",
       "label": "爬取数据治理",
       "task": "cheap",
