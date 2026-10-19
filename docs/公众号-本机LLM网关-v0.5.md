@@ -84,8 +84,8 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8021
 
 代码完全开源，欢迎围观、提 issue、拍砖：
 
-- Gitee（国内）：https://gitee.com/<你的用户名>/llm-gateway
-- GitHub（国际）：https://github.com/<你的用户名>/llm-gateway
+- Gitee（国内）：https://gitee.com/fling_lee2008/llm-gateway
+- GitHub（国际镜像）：https://github.com/fling_lee2008/llm-gateway（即将同步）
 
 如果你也受够了「调模型烧钱还没数」，不妨试试，顺便点个 star ⭐。
 
